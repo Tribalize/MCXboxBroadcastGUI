@@ -16,12 +16,4 @@ This will start the MCXboxBroadcastGUI. With auto session restart.
 Add AUTO_RESTART_PATCH.md to the same folder as the Jar
 ### Auto-Restart explained
 
-The GUI watchdog operates at the **process level** — it watches for the child JVM to exit and relaunches it. This complements the built-in `restart` command (which operates inside the JVM) because it handles situations the internal restart cannot:
-
-| Scenario | Internal `restart` command | GUI watchdog |
-|----------|---------------------------|--------------|
-| Token refresh / Xbox session reconnect | ✅ Works | Not needed |
-| RTC/WebSocket permanently wedged (Issue #184) | ❌ Process hangs | ✅ Detects exit, relaunches |
-| JVM OutOfMemoryError / fatal crash | ❌ JVM is dead | ✅ Relaunches |
-| Network interface change (laptop sleep/wake) | ⚠️ Partial | ✅ Full relaunch |
-
+The GUI watchdog operates at the **process level** — it watches for the child JVM to exit and relaunches it. This complements the built-in `restart` command (which operates inside the JVM) because it handles situations the internal restart cannot
