@@ -6,9 +6,10 @@ import java.awt.event.*;
 import java.io.*;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.*;
@@ -16,96 +17,106 @@ import java.util.regex.*;
 /**
  * MCXboxBroadcast Windows GUI Launcher
  *
- * HOW TO USE:
- *   1. Place this .java file in the same folder as MCXboxBroadcastStandalone.jar
- *   2. Open Command Prompt in that folder
- *   3. Compile:  javac MCXboxBroadcastGUI.java
- *   4. Run:      java MCXboxBroadcastGUI
- *
- * Requires Java 11+  (same JRE used to run the standalone JAR)
+ * This version includes:
+ *   - Integrated config.yml editor (no manual YAML editing needed)
+ *   - Auto-detect bundled JAR for jpackage EXE builds
+ *   - Bundled JRE support (no Java install needed for end users)
+ *   - Auto-restart watchdog
+ *   - Auth code detection with one-click browser open
  */
 public class MCXboxBroadcastGUI extends JFrame {
 
-    // ── Colours ───────────────────────────────────────────────────────────────
-    private static final Color BG_DARK        = new Color(0x1A1D23);
-    private static final Color BG_PANEL       = new Color(0x22262F);
-    private static final Color BG_INPUT       = new Color(0x2A2F3A);
-    private static final Color ACCENT_GREEN   = new Color(0x4CAF50);
-    private static final Color ACCENT_YELLOW  = new Color(0xFFC107);
-    private static final Color ACCENT_RED     = new Color(0xF44336);
-    private static final Color ACCENT_BLUE    = new Color(0x42A5F5);
-    private static final Color ACCENT_PURPLE  = new Color(0xAB47BC);
+    // ── Colours ──────────────────────────────────────────────────────────────
+    private static final Color BG_DARK       = new Color(0x1A1D23);
+    private static final Color BG_PANEL      = new Color(0x22262F);
+    private static final Color BG_INPUT      = new Color(0x2A2F3A);
+    private static final Color ACCENT_GREEN  = new Color(0x4CAF50);
+    private static final Color ACCENT_YELLOW = new Color(0xFFC107);
+    private static final Color ACCENT_RED    = new Color(0xF44336);
+    private static final Color ACCENT_BLUE   = new Color(0x42A5F5);
     private static final Color TEXT_PRIMARY   = new Color(0xECEFF4);
     private static final Color TEXT_MUTED     = new Color(0x8892A4);
     private static final Color TEXT_INFO      = new Color(0x88C0D0);
     private static final Color TEXT_WARN      = new Color(0xEBCB8B);
     private static final Color TEXT_ERROR     = new Color(0xBF616A);
 
-    // ── UI components ─────────────────────────────────────────────────────────
-    private JTextPane      logPane;
+    // ── UI components ── main ────────────────────────────────────────────────
+    private JTextPane  logPane;
     private StyledDocument logDoc;
-    private JTextField     cmdField;
-    private JLabel         statusLabel;
-    private JLabel         statusDot;
-    private JButton        startStopBtn;
-    private JButton        restartBtn;
-    private JButton        openBrowserBtn;
-    private JTextField     jarPathField;
-    private JSpinner       heapSpinner;
-    private JCheckBox      autoRestartCb;
-    private JSpinner       cooldownSpinner;
-    private JPanel         authBarRef;
+    private JTextField cmdField;
+    private JLabel     statusLabel;
+    private JLabel     statusDot;
+    private JButton    startStopBtn;
+    private JButton    restartBtn;
+    private JButton    openBrowserBtn;
+    private JTextField jarPathField;
+    private JSpinner   heapSpinner;
+    private JCheckBox  autoRestartCb;
+    private JSpinner   cooldownSpinner;
+    private JPanel     authBarRef;
 
-    // ── Timed session restart ─────────────────────────────────────────────────
-    private JCheckBox      timedRestartCb;
-    private JComboBox<String> timedRestartCombo;
-    private JLabel         timedRestartNextLabel;
-    private ScheduledFuture<?> timedRestartFuture;
-    private long           timedRestartNextEpoch = 0;
-    private ScheduledFuture<?> timedRestartTickFuture;
+    // ── UI components ── config editor ───────────────────────────────────────
+    private JTextField cfgRemoteAddress;
+    private JTextField cfgRemotePort;
+    private JSpinner   cfgUpdateInterval;
+    private JSpinner   cfgFriendSyncInterval;
+    private JCheckBox  cfgAutoFollow;
+    private JCheckBox  cfgAutoUnfollow;
+    private JCheckBox  cfgInitialInvite;
+    private JCheckBox  cfgShouldExpire;
+    private JSpinner   cfgExpireDays;
+    private JSpinner   cfgExpireCheck;
+    private JCheckBox  cfgSlackEnabled;
+    private JTextField cfgSlackUrl;
 
-    // ── Process management ────────────────────────────────────────────────────
-    private Process     process;
+    // ── Tabbed pane for sidebar ──────────────────────────────────────────────
+    private JTabbedPane sidebarTabs;
+
+    // ── Process management ───────────────────────────────────────────────────
+    private Process process;
     private PrintWriter processStdin;
-    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3);
     private final AtomicBoolean running  = new AtomicBoolean(false);
     private final AtomicBoolean stopping = new AtomicBoolean(false);
     private ScheduledFuture<?> countdownFuture;
 
-    // ── Auth detection ────────────────────────────────────────────────────────
+    // ── Auth detection ───────────────────────────────────────────────────────
     private static final Pattern AUTH_CODE_PATTERN =
-        Pattern.compile("enter the code ([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("enter the code ([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
     private String lastAuthUrl = "https://www.microsoft.com/link";
 
-    // ── Preferences ───────────────────────────────────────────────────────────
+    // ── Preferences ──────────────────────────────────────────────────────────
     private static final String PREFS_FILE = "mcxboxbroadcast-gui.properties";
     private final Properties prefs = new Properties();
 
-    // ── Time formatter ────────────────────────────────────────────────────────
+    // ── Time formatter ───────────────────────────────────────────────────────
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
 
-    // ── Timed restart interval options (label → minutes) ──────────────────────
-    private static final String[] TIMED_LABELS   = {"30 min","1 hour","2 hours","3 hours","4 hours","6 hours","8 hours","12 hours","24 hours"};
-    private static final int[]    TIMED_MINUTES   = {    30,       60,      120,      180,      240,      360,      480,       720,      1440};
+    // ── Bundled JAR name ─────────────────────────────────────────────────────
+    private static final String STANDALONE_JAR_NAME = "MCXboxBroadcastStandalone.jar";
+    private static final String CONFIG_FILE_NAME    = "config.yml";
 
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     //  ENTRY POINT
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
+
     public static void main(String[] args) {
         try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); }
         catch (Exception ignored) {}
         SwingUtilities.invokeLater(() -> new MCXboxBroadcastGUI().setVisible(true));
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     //  CONSTRUCTOR
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
+
     public MCXboxBroadcastGUI() {
-        super("MCXboxBroadcast — Windows Launcher");
+        super("MCXboxBroadcast \u2014 Windows Launcher");
         loadPrefs();
         buildUI();
-        setSize(980, 700);
-        setMinimumSize(new Dimension(740, 500));
+        loadConfigFromDisk();
+        setSize(1060, 720);
+        setMinimumSize(new Dimension(800, 520));
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) { onClose(); }
@@ -114,25 +125,75 @@ public class MCXboxBroadcastGUI extends JFrame {
         getContentPane().setBackground(BG_DARK);
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
+    //  AUTO-DETECT BUNDLED JAR
+    // ════════════════════════════════════════════════════════════════════════
+
+    private String resolveJarPath() {
+        String saved = prefs.getProperty("jar.path", "");
+        if (!saved.isEmpty() && new File(saved).exists()) return saved;
+
+        String classDir = getAppDirectory();
+        if (classDir != null) {
+            File candidate = new File(classDir, STANDALONE_JAR_NAME);
+            if (candidate.exists()) return candidate.getAbsolutePath();
+            candidate = new File(new File(classDir, "app"), STANDALONE_JAR_NAME);
+            if (candidate.exists()) return candidate.getAbsolutePath();
+        }
+
+        File cwd = new File(System.getProperty("user.dir"), STANDALONE_JAR_NAME);
+        if (cwd.exists()) return cwd.getAbsolutePath();
+
+        return saved.isEmpty() ? STANDALONE_JAR_NAME : saved;
+    }
+
+    private String getAppDirectory() {
+        try {
+            String appDir = System.getProperty("jpackage.app-path");
+            if (appDir != null) return new File(appDir).getParent();
+            var location = MCXboxBroadcastGUI.class.getProtectionDomain()
+                    .getCodeSource().getLocation();
+            if (location != null) {
+                File f = new File(location.toURI());
+                return f.isDirectory() ? f.getAbsolutePath() : f.getParent();
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private File getConfigDirectory() {
+        String jar = jarPathField.getText().trim();
+        File jarFile = new File(jar);
+        if (jarFile.exists() && jarFile.getParentFile() != null) {
+            return jarFile.getParentFile();
+        }
+        return new File(System.getProperty("user.dir"));
+    }
+
+    private File getConfigFile() {
+        return new File(getConfigDirectory(), CONFIG_FILE_NAME);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  UI BUILD
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
+
     private void buildUI() {
         setLayout(new BorderLayout(0, 0));
 
-        // ── Top bar ───────────────────────────────────────────────────────────
+        // ── Top bar ──────────────────────────────────────────────────────────
         JPanel topBar = new JPanel(new BorderLayout(8, 0));
         topBar.setBackground(BG_PANEL);
         topBar.setBorder(new EmptyBorder(10, 14, 10, 14));
 
-        JLabel logo = new JLabel("MCXboxBroadcast  —  Windows Launcher");
+        JLabel logo = new JLabel("MCXboxBroadcast \u2014 Windows Launcher");
         logo.setFont(new Font("Segoe UI", Font.BOLD, 15));
         logo.setForeground(ACCENT_GREEN);
         topBar.add(logo, BorderLayout.WEST);
 
         JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         statusPanel.setOpaque(false);
-        statusDot = new JLabel("●");
+        statusDot = new JLabel("\u25CF");
         statusDot.setFont(new Font("Segoe UI", Font.BOLD, 15));
         statusDot.setForeground(ACCENT_RED);
         statusLabel = new JLabel("Stopped");
@@ -141,10 +202,22 @@ public class MCXboxBroadcastGUI extends JFrame {
         statusPanel.add(statusDot);
         statusPanel.add(statusLabel);
         topBar.add(statusPanel, BorderLayout.EAST);
+
         add(topBar, BorderLayout.NORTH);
 
-        // ── Left sidebar ──────────────────────────────────────────────────────
-        add(buildSidebar(), BorderLayout.WEST);
+        // ── Left sidebar with tabs ───────────────────────────────────────────
+        sidebarTabs = new JTabbedPane(JTabbedPane.TOP);
+        sidebarTabs.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        sidebarTabs.setBackground(BG_PANEL);
+        sidebarTabs.setForeground(TEXT_PRIMARY);
+        sidebarTabs.setPreferredSize(new Dimension(260, 0));
+
+        sidebarTabs.addTab("Launcher", buildLauncherTab());
+        sidebarTabs.addTab("Server", buildServerConfigTab());
+        sidebarTabs.addTab("Friends", buildFriendConfigTab());
+        sidebarTabs.addTab("Webhook", buildSlackConfigTab());
+
+        add(sidebarTabs, BorderLayout.WEST);
 
         // ── Centre: log + command row ─────────────────────────────────────────
         JPanel centre = new JPanel(new BorderLayout(0, 4));
@@ -161,7 +234,6 @@ public class MCXboxBroadcastGUI extends JFrame {
         scroll.setBorder(BorderFactory.createLineBorder(new Color(0x2E3440)));
         centre.add(scroll, BorderLayout.CENTER);
 
-        // Command input row
         JPanel cmdRow = new JPanel(new BorderLayout(6, 0));
         cmdRow.setBackground(BG_DARK);
 
@@ -186,14 +258,14 @@ public class MCXboxBroadcastGUI extends JFrame {
 
         add(centre, BorderLayout.CENTER);
 
-        // ── Auth banner (hidden until detected) ───────────────────────────────
-        openBrowserBtn = makeButton("  Open Microsoft Login Page  ", ACCENT_BLUE);
+        // ── Auth banner ──────────────────────────────────────────────────────
+        openBrowserBtn = makeButton(" Open Microsoft Login Page ", ACCENT_BLUE);
         openBrowserBtn.addActionListener(e -> {
             try { Desktop.getDesktop().browse(new URI(lastAuthUrl)); }
             catch (Exception ex) { appendLog("[GUI] Could not open browser: " + ex.getMessage(), TEXT_ERROR); }
         });
 
-        JLabel authHint = new JLabel("  Authentication required — sign in with your Microsoft/Xbox account:");
+        JLabel authHint = new JLabel(" Authentication required \u2014 sign in with your Microsoft/Xbox account:");
         authHint.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         authHint.setForeground(ACCENT_BLUE);
 
@@ -205,24 +277,31 @@ public class MCXboxBroadcastGUI extends JFrame {
         authBarRef.setVisible(false);
         add(authBarRef, BorderLayout.SOUTH);
 
-        // Welcome messages
-        appendLog("[GUI] MCXboxBroadcast Launcher ready.", ACCENT_GREEN);
-        appendLog("[GUI] Select your JAR file, configure settings, then click Start.", TEXT_MUTED);
+        // Welcome
+        String resolvedPath = jarPathField.getText();
+        if (new File(resolvedPath).exists()) {
+            appendLog("[GUI] MCXboxBroadcast Launcher ready.", ACCENT_GREEN);
+            appendLog("[GUI] Standalone JAR found: " + resolvedPath, ACCENT_GREEN);
+            appendLog("[GUI] Configure your server in the Server tab, then click Start.", TEXT_MUTED);
+        } else {
+            appendLog("[GUI] MCXboxBroadcast Launcher ready.", ACCENT_GREEN);
+            appendLog("[GUI] Standalone JAR not found at: " + resolvedPath, TEXT_WARN);
+            appendLog("[GUI] Use Browse... to locate MCXboxBroadcastStandalone.jar", TEXT_MUTED);
+        }
     }
 
-    private JPanel buildSidebar() {
+    // ── Sidebar Tab: Launcher ────────────────────────────────────────────────
+
+    private JPanel buildLauncherTab() {
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setBackground(BG_PANEL);
-        p.setBorder(new EmptyBorder(14, 12, 14, 12));
-        p.setPreferredSize(new Dimension(230, 0));
+        p.setBorder(new EmptyBorder(12, 10, 12, 10));
 
-        // ── JAR file ──────────────────────────────────────────────────────────
         p.add(sectionLabel("JAR FILE"));
-        jarPathField = new JTextField(prefs.getProperty("jar.path", "MCXboxBroadcastStandalone.jar"));
+        jarPathField = new JTextField(resolveJarPath());
         styleTextField(jarPathField);
         jarPathField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        jarPathField.setToolTipText("Full path to MCXboxBroadcastStandalone.jar");
         p.add(jarPathField);
         p.add(Box.createVerticalStrut(4));
 
@@ -231,7 +310,6 @@ public class MCXboxBroadcastGUI extends JFrame {
         browseBtn.addActionListener(e -> browseJar());
         p.add(browseBtn);
 
-        // ── Heap ──────────────────────────────────────────────────────────────
         p.add(Box.createVerticalStrut(12));
         p.add(sectionLabel("MAX HEAP (MB)"));
         int heap = parseIntSafe(prefs.getProperty("heap.mb", "256"), 256);
@@ -240,9 +318,8 @@ public class MCXboxBroadcastGUI extends JFrame {
         heapSpinner.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         p.add(heapSpinner);
 
-        // ── Crash auto-restart ────────────────────────────────────────────────
         p.add(Box.createVerticalStrut(12));
-        p.add(sectionLabel("CRASH AUTO-RESTART"));
+        p.add(sectionLabel("AUTO-RESTART"));
         autoRestartCb = new JCheckBox("Restart on crash / exit");
         autoRestartCb.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         autoRestartCb.setForeground(TEXT_PRIMARY);
@@ -252,256 +329,364 @@ public class MCXboxBroadcastGUI extends JFrame {
         p.add(autoRestartCb);
 
         p.add(Box.createVerticalStrut(6));
-        p.add(sectionLabel("CRASH COOLDOWN (seconds)"));
+        p.add(sectionLabel("COOLDOWN (seconds)"));
         int cooldown = parseIntSafe(prefs.getProperty("cooldown.s", "30"), 30);
         cooldownSpinner = new JSpinner(new SpinnerNumberModel(cooldown, 5, 300, 5));
         styleSpinner(cooldownSpinner);
         cooldownSpinner.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         p.add(cooldownSpinner);
 
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // ── TIMED SESSION RESTART ─────────────────────────────────────────────
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        p.add(Box.createVerticalStrut(14));
-
-        // Divider line
-        JSeparator sep = new JSeparator();
-        sep.setForeground(new Color(0x3B4252));
-        sep.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
-        p.add(sep);
-        p.add(Box.createVerticalStrut(10));
-
-        p.add(sectionLabel("TIMED SESSION RESTART"));
-
-        timedRestartCb = new JCheckBox("Auto-restart session every:");
-        timedRestartCb.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        timedRestartCb.setForeground(ACCENT_PURPLE);
-        timedRestartCb.setBackground(BG_PANEL);
-        timedRestartCb.setSelected(Boolean.parseBoolean(prefs.getProperty("timed.restart.enabled", "false")));
-        timedRestartCb.setAlignmentX(Component.LEFT_ALIGNMENT);
-        timedRestartCb.setToolTipText("Sends 'restart' to the JAR on a fixed schedule to keep the Xbox Live session fresh");
-        p.add(timedRestartCb);
-
-        p.add(Box.createVerticalStrut(5));
-
-        // Interval combo
-        timedRestartCombo = new JComboBox<>(TIMED_LABELS);
-        timedRestartCombo.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        timedRestartCombo.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        timedRestartCombo.setAlignmentX(Component.LEFT_ALIGNMENT);
-        // Custom renderer so text is always visible regardless of Windows LAF
-        timedRestartCombo.setRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(
-                    JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-                JLabel lbl = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                lbl.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-                lbl.setBorder(new EmptyBorder(3, 8, 3, 8));
-                if (isSelected) {
-                    lbl.setBackground(new Color(0x3B4252));
-                    lbl.setForeground(TEXT_PRIMARY);
-                } else {
-                    lbl.setBackground(BG_INPUT);
-                    lbl.setForeground(TEXT_PRIMARY);
-                }
-                return lbl;
-            }
-        });
-        // Style the combo button area itself
-        timedRestartCombo.setBackground(BG_INPUT);
-        timedRestartCombo.setForeground(TEXT_PRIMARY);
-        timedRestartCombo.setBorder(BorderFactory.createLineBorder(new Color(0x3B4252)));
-        for (int ci = 0; ci < timedRestartCombo.getComponentCount(); ci++) {
-            Component comp = timedRestartCombo.getComponent(ci);
-            comp.setBackground(BG_INPUT);
-            comp.setForeground(TEXT_PRIMARY);
-        }
-
-        // Restore saved selection
-        int savedTimedIdx = parseIntSafe(prefs.getProperty("timed.restart.idx", "1"), 1);
-        if (savedTimedIdx >= 0 && savedTimedIdx < TIMED_LABELS.length)
-            timedRestartCombo.setSelectedIndex(savedTimedIdx);
-
-        // Rearm the timer whenever the user changes the interval while running
-        timedRestartCombo.addActionListener(e -> {
-            if (timedRestartCb.isSelected() && running.get()) armTimedRestart();
-        });
-        timedRestartCb.addActionListener(e -> {
-            if (timedRestartCb.isSelected() && running.get()) armTimedRestart();
-            else cancelTimedRestart();
-        });
-
-        p.add(timedRestartCombo);
-
-        p.add(Box.createVerticalStrut(5));
-
-        // Countdown label — shows "Next restart in X h Ym"
-        timedRestartNextLabel = new JLabel("Next restart: —");
-        timedRestartNextLabel.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        timedRestartNextLabel.setForeground(TEXT_MUTED);
-        timedRestartNextLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        p.add(timedRestartNextLabel);
-
-        // Divider line
-        p.add(Box.createVerticalStrut(10));
-        JSeparator sep2 = new JSeparator();
-        sep2.setForeground(new Color(0x3B4252));
-        sep2.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
-        p.add(sep2);
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-        // ── Controls ──────────────────────────────────────────────────────────
-        p.add(Box.createVerticalStrut(12));
+        p.add(Box.createVerticalStrut(16));
         p.add(sectionLabel("CONTROLS"));
 
-        startStopBtn = makeButton("▶   Start", ACCENT_GREEN);
+        startStopBtn = makeButton("\u25B6  Start", ACCENT_GREEN);
         startStopBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
         startStopBtn.addActionListener(e -> toggleStartStop());
         p.add(startStopBtn);
-        p.add(Box.createVerticalStrut(6));
 
-        restartBtn = makeButton("↺   Restart Session Now", ACCENT_YELLOW);
+        p.add(Box.createVerticalStrut(6));
+        restartBtn = makeButton("\u21BA  Restart Session", ACCENT_YELLOW);
         restartBtn.setEnabled(false);
         restartBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
-        restartBtn.addActionListener(e -> doRestartNow());
+        restartBtn.addActionListener(e -> doRestart());
         p.add(restartBtn);
 
         p.add(Box.createVerticalGlue());
-
-        JLabel footer = new JLabel("MCXboxBroadcast GUI Launcher");
-        footer.setFont(new Font("Segoe UI", Font.PLAIN, 10));
-        footer.setForeground(TEXT_MUTED);
-        footer.setAlignmentX(Component.LEFT_ALIGNMENT);
-        p.add(footer);
-
         return p;
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
-    //  TIMED RESTART LOGIC
-    // ════════════════════════════════════════════════════════════════════════════
+    // ── Sidebar Tab: Server Config ───────────────────────────────────────────
 
-    /** Arms (or re-arms) the periodic session-restart timer based on current combo selection. */
-    private void armTimedRestart() {
-        cancelTimedRestart();                           // cancel any existing timer first
+    private JPanel buildServerConfigTab() {
+        JPanel p = new JPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBackground(BG_PANEL);
+        p.setBorder(new EmptyBorder(12, 10, 12, 10));
 
-        int idx     = timedRestartCombo.getSelectedIndex();
-        int minutes = TIMED_MINUTES[Math.max(0, idx)];
-        long delayMs = (long) minutes * 60 * 1000;
+        p.add(sectionLabel("REMOTE ADDRESS"));
+        p.add(descLabel("Your server's public IP or domain"));
+        cfgRemoteAddress = new JTextField("auto");
+        styleTextField(cfgRemoteAddress);
+        cfgRemoteAddress.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgRemoteAddress);
 
-        timedRestartNextEpoch = System.currentTimeMillis() + delayMs;
+        p.add(Box.createVerticalStrut(10));
+        p.add(sectionLabel("REMOTE PORT"));
+        p.add(descLabel("Server port (\"auto\" = use default 19132)"));
+        cfgRemotePort = new JTextField("auto");
+        styleTextField(cfgRemotePort);
+        cfgRemotePort.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgRemotePort);
 
-        appendLog("[GUI] Timed session restart armed — every " + TIMED_LABELS[idx]
-                + " (first restart in " + TIMED_LABELS[idx] + ")", ACCENT_PURPLE);
+        p.add(Box.createVerticalStrut(10));
+        p.add(sectionLabel("UPDATE INTERVAL (seconds)"));
+        p.add(descLabel("How often to sync session info (min 20)"));
+        cfgUpdateInterval = new JSpinner(new SpinnerNumberModel(30, 20, 600, 5));
+        styleSpinner(cfgUpdateInterval);
+        cfgUpdateInterval.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgUpdateInterval);
 
-        // Fire the actual restart at interval
-        timedRestartFuture = scheduler.scheduleAtFixedRate(() -> {
-            if (!running.get() || stopping.get()) return;
-            appendLog("[GUI] ⏰ Timed session restart firing now (" + TIMED_LABELS[idx] + " interval)", ACCENT_PURPLE);
-            doSessionRestartCommand();
-            // reset the countdown epoch for the NEXT cycle
-            timedRestartNextEpoch = System.currentTimeMillis() + delayMs;
-        }, delayMs, delayMs, TimeUnit.MILLISECONDS);
+        p.add(Box.createVerticalStrut(16));
 
-        // Tick every 10 s to update the "Next restart in …" label
-        timedRestartTickFuture = scheduler.scheduleAtFixedRate(
-            this::updateTimedRestartLabel, 0, 10, TimeUnit.SECONDS);
-    }
+        JButton saveBtn = makeButton("Save Server Config", ACCENT_GREEN);
+        saveBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        saveBtn.addActionListener(e -> saveConfigToDisk());
+        p.add(saveBtn);
 
-    /** Cancels the timed restart timer and clears the label. */
-    private void cancelTimedRestart() {
-        if (timedRestartFuture     != null) { timedRestartFuture.cancel(false);     timedRestartFuture = null; }
-        if (timedRestartTickFuture != null) { timedRestartTickFuture.cancel(false); timedRestartTickFuture = null; }
-        timedRestartNextEpoch = 0;
-        SwingUtilities.invokeLater(() -> timedRestartNextLabel.setText("Next restart: —"));
-    }
+        p.add(Box.createVerticalStrut(6));
 
-    /** Updates the sidebar countdown label. Called every 10 s from tick future. */
-    private void updateTimedRestartLabel() {
-        if (timedRestartNextEpoch == 0) return;
-        long rem0 = timedRestartNextEpoch - System.currentTimeMillis();
-        if (rem0 < 0) rem0 = 0;
-        final long hh = rem0 / 3_600_000L;
-        final long mm = (rem0 % 3_600_000L) / 60_000L;
-        final String txt = hh > 0
-            ? String.format("Next restart in %dh %02dm", hh, mm)
-            : String.format("Next restart in %dm", mm);
-        final Color col = rem0 < 120_000L ? ACCENT_YELLOW : TEXT_MUTED;
-        SwingUtilities.invokeLater(() -> {
-            timedRestartNextLabel.setText(txt);
-            timedRestartNextLabel.setForeground(col);
+        JButton reloadBtn = makeButton("Reload from Disk", TEXT_MUTED);
+        reloadBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        reloadBtn.addActionListener(e -> {
+            loadConfigFromDisk();
+            appendLog("[GUI] Config reloaded from disk.", TEXT_INFO);
         });
+        p.add(reloadBtn);
+
+        p.add(Box.createVerticalGlue());
+        return p;
     }
 
-    /**
-     * Sends "restart" to the JAR stdin — triggers SessionManager.restart()
-     * inside the JVM, refreshing the Xbox Live session without killing the process.
-     * Used by both the manual button AND the timed scheduler.
-     */
-    private void doSessionRestartCommand() {
-        if (!running.get()) return;
-        if (processStdin != null) processStdin.println("restart");
-        SwingUtilities.invokeLater(() -> setStatus("Restarting session...", ACCENT_YELLOW));
-        // After 8 s revert status to Running (or re-launch if process died)
-        scheduler.schedule(() -> {
-            if (!running.get() && !stopping.get()) {
-                SwingUtilities.invokeLater(this::startProcess);
-            } else {
-                SwingUtilities.invokeLater(() -> setStatus("Running", ACCENT_GREEN));
+    // ── Sidebar Tab: Friend Sync Config ──────────────────────────────────────
+
+    private JPanel buildFriendConfigTab() {
+        JPanel p = new JPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBackground(BG_PANEL);
+        p.setBorder(new EmptyBorder(12, 10, 12, 10));
+
+        p.add(sectionLabel("FRIEND SYNC INTERVAL (seconds)"));
+        p.add(descLabel("How often to check followers (min 20)"));
+        cfgFriendSyncInterval = new JSpinner(new SpinnerNumberModel(60, 20, 600, 5));
+        styleSpinner(cfgFriendSyncInterval);
+        cfgFriendSyncInterval.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgFriendSyncInterval);
+
+        p.add(Box.createVerticalStrut(10));
+        p.add(sectionLabel("FRIEND OPTIONS"));
+
+        cfgAutoFollow = new JCheckBox("Auto-follow new followers");
+        styleCheckbox(cfgAutoFollow, true);
+        p.add(cfgAutoFollow);
+
+        cfgAutoUnfollow = new JCheckBox("Auto-unfollow lost followers");
+        styleCheckbox(cfgAutoUnfollow, true);
+        p.add(cfgAutoUnfollow);
+
+        cfgInitialInvite = new JCheckBox("Send invite on new friend");
+        styleCheckbox(cfgInitialInvite, true);
+        p.add(cfgInitialInvite);
+
+        p.add(Box.createVerticalStrut(10));
+        p.add(sectionLabel("FRIEND EXPIRY"));
+
+        cfgShouldExpire = new JCheckBox("Expire inactive friends");
+        styleCheckbox(cfgShouldExpire, true);
+        p.add(cfgShouldExpire);
+
+        p.add(Box.createVerticalStrut(6));
+        p.add(sectionLabel("EXPIRE AFTER (days)"));
+        cfgExpireDays = new JSpinner(new SpinnerNumberModel(15, 1, 365, 1));
+        styleSpinner(cfgExpireDays);
+        cfgExpireDays.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgExpireDays);
+
+        p.add(Box.createVerticalStrut(6));
+        p.add(sectionLabel("EXPIRE CHECK INTERVAL (seconds)"));
+        cfgExpireCheck = new JSpinner(new SpinnerNumberModel(1800, 60, 86400, 60));
+        styleSpinner(cfgExpireCheck);
+        cfgExpireCheck.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgExpireCheck);
+
+        p.add(Box.createVerticalStrut(16));
+
+        JButton saveBtn = makeButton("Save Friend Config", ACCENT_GREEN);
+        saveBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        saveBtn.addActionListener(e -> saveConfigToDisk());
+        p.add(saveBtn);
+
+        p.add(Box.createVerticalGlue());
+        return p;
+    }
+
+    // ── Sidebar Tab: Slack Webhook ───────────────────────────────────────────
+
+    private JPanel buildSlackConfigTab() {
+        JPanel p = new JPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBackground(BG_PANEL);
+        p.setBorder(new EmptyBorder(12, 10, 12, 10));
+
+        p.add(sectionLabel("SLACK WEBHOOK"));
+
+        cfgSlackEnabled = new JCheckBox("Enable Slack notifications");
+        styleCheckbox(cfgSlackEnabled, false);
+        p.add(cfgSlackEnabled);
+
+        p.add(Box.createVerticalStrut(8));
+        p.add(sectionLabel("WEBHOOK URL"));
+        p.add(descLabel("Paste your Slack webhook URL"));
+        cfgSlackUrl = new JTextField("");
+        styleTextField(cfgSlackUrl);
+        cfgSlackUrl.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgSlackUrl);
+
+        p.add(Box.createVerticalStrut(16));
+
+        JButton saveBtn = makeButton("Save Webhook Config", ACCENT_GREEN);
+        saveBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        saveBtn.addActionListener(e -> saveConfigToDisk());
+        p.add(saveBtn);
+
+        p.add(Box.createVerticalGlue());
+        return p;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  CONFIG.YML READ / WRITE
+    // ════════════════════════════════════════════════════════════════════════
+
+    private void loadConfigFromDisk() {
+        File configFile = getConfigFile();
+        if (!configFile.exists()) {
+            appendLog("[GUI] No config.yml found yet \u2014 defaults loaded. Set your server IP in the Server tab.", TEXT_MUTED);
+            return;
+        }
+
+        try {
+            java.util.List<String> lines = Files.readAllLines(configFile.toPath(), StandardCharsets.UTF_8);
+            String section = "";
+
+            for (String raw : lines) {
+                String trimmed = raw.trim();
+                if (trimmed.startsWith("#") || trimmed.isEmpty()) continue;
+
+                if (!raw.startsWith(" ") && !raw.startsWith("\t") && trimmed.endsWith(":") && !trimmed.contains(": ")) {
+                    section = trimmed.substring(0, trimmed.length() - 1).trim();
+                    continue;
+                }
+
+                String key = trimmed.contains(":") ? trimmed.substring(0, trimmed.indexOf(':')).trim() : "";
+                String value = trimmed.contains(":") ? trimmed.substring(trimmed.indexOf(':') + 1).trim() : "";
+                if (value.startsWith("\"") && value.endsWith("\""))
+                    value = value.substring(1, value.length() - 1);
+
+                switch (section) {
+                    case "":
+                        switch (key) {
+                            case "remote-address":  cfgRemoteAddress.setText(value); break;
+                            case "remote-port":     cfgRemotePort.setText(value); break;
+                            case "update-interval": setSpinnerSafe(cfgUpdateInterval, value); break;
+                        }
+                        break;
+                    case "friend-sync":
+                        switch (key) {
+                            case "update-interval": setSpinnerSafe(cfgFriendSyncInterval, value); break;
+                            case "auto-follow":     cfgAutoFollow.setSelected(toBool(value)); break;
+                            case "auto-unfollow":   cfgAutoUnfollow.setSelected(toBool(value)); break;
+                            case "initial-invite":  cfgInitialInvite.setSelected(toBool(value)); break;
+                            case "should-expire":   cfgShouldExpire.setSelected(toBool(value)); break;
+                            case "expire-days":     setSpinnerSafe(cfgExpireDays, value); break;
+                            case "expire-check":    setSpinnerSafe(cfgExpireCheck, value); break;
+                        }
+                        break;
+                    case "slack-webhook":
+                        switch (key) {
+                            case "enabled":      cfgSlackEnabled.setSelected(toBool(value)); break;
+                            case "webhook-url":  cfgSlackUrl.setText(value); break;
+                        }
+                        break;
+                }
             }
-        }, 8, TimeUnit.SECONDS);
+
+            appendLog("[GUI] Loaded config from: " + configFile.getAbsolutePath(), TEXT_INFO);
+        } catch (IOException e) {
+            appendLog("[GUI] Failed to read config.yml: " + e.getMessage(), TEXT_ERROR);
+        }
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
+    private void saveConfigToDisk() {
+        File configFile = getConfigFile();
+
+        StringBuilder yaml = new StringBuilder();
+        yaml.append("# MCXboxBroadcast Standalone Configuration\n");
+        yaml.append("# Generated by MCXboxBroadcast GUI Launcher\n\n");
+
+        yaml.append("# The IP address to broadcast, you likely want to change this to\n");
+        yaml.append("# your server's public IP\n");
+        yaml.append("remote-address: ").append(cfgRemoteAddress.getText().trim()).append("\n\n");
+
+        yaml.append("# The port to broadcast, this should be left as auto unless you're\n");
+        yaml.append("# manipulating the port using network rules or reverse proxies\n");
+        yaml.append("remote-port: ").append(cfgRemotePort.getText().trim()).append("\n\n");
+
+        yaml.append("# The amount of time in seconds to update session information and\n");
+        yaml.append("# sync other data\n");
+        yaml.append("# Warning: This can be no lower than 20 due to xbox rate limits\n");
+        yaml.append("update-interval: ").append(cfgUpdateInterval.getValue()).append("\n\n");
+
+        yaml.append("# Friend/follower list sync settings\n");
+        yaml.append("friend-sync:\n");
+        yaml.append("  # The amount of time in seconds to check for follower changes\n");
+        yaml.append("  update-interval: ").append(cfgFriendSyncInterval.getValue()).append("\n\n");
+        yaml.append("  # Should we automatically follow people that follow us\n");
+        yaml.append("  auto-follow: ").append(cfgAutoFollow.isSelected()).append("\n\n");
+        yaml.append("  # Should we automatically unfollow people that no longer follow us\n");
+        yaml.append("  auto-unfollow: ").append(cfgAutoUnfollow.isSelected()).append("\n\n");
+        yaml.append("  # Should we automatically send an invite when a friend is added\n");
+        yaml.append("  initial-invite: ").append(cfgInitialInvite.isSelected()).append("\n\n");
+        yaml.append("  # Should we unfriend people that haven't joined the server in a while\n");
+        yaml.append("  should-expire: ").append(cfgShouldExpire.isSelected()).append("\n\n");
+        yaml.append("  # The amount of time in days before a friend is considered expired\n");
+        yaml.append("  expire-days: ").append(cfgExpireDays.getValue()).append("\n\n");
+        yaml.append("  # How often to check in seconds for expired friends\n");
+        yaml.append("  expire-check: ").append(cfgExpireCheck.getValue()).append("\n\n");
+
+        yaml.append("# Slack webhook settings\n");
+        yaml.append("slack-webhook:\n");
+        yaml.append("  # Should we send a message to a slack webhook when the session is updated\n");
+        yaml.append("  enabled: ").append(cfgSlackEnabled.isSelected()).append("\n\n");
+        yaml.append("  # The webhook url to send the message to\n");
+        yaml.append("  webhook-url: \"").append(cfgSlackUrl.getText().trim()).append("\"\n\n");
+        yaml.append("  # The message to send when the session is expired and needs to be updated\n");
+        yaml.append("  session-expired-message: |\n");
+        yaml.append("    <!here> Xbox Session expired, sign in again to update it.\n\n");
+        yaml.append("    Use the following link to sign in: %s\n");
+        yaml.append("    Enter the code: %s\n\n");
+        yaml.append("  # The message to send when a friend has restrictions\n");
+        yaml.append("  friend-restriction-message: |\n");
+        yaml.append("    %s (%s) has restrictions in place that prevent them from being friends with our account.\n");
+
+        try {
+            configFile.getParentFile().mkdirs();
+            Files.writeString(configFile.toPath(), yaml.toString(), StandardCharsets.UTF_8);
+            appendLog("[GUI] Config saved to: " + configFile.getAbsolutePath(), ACCENT_GREEN);
+            if (running.get()) {
+                appendLog("[GUI] Note: Restart the session for config changes to take effect.", ACCENT_YELLOW);
+            }
+        } catch (IOException e) {
+            appendLog("[GUI] Failed to save config.yml: " + e.getMessage(), TEXT_ERROR);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  PROCESS LIFECYCLE
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private void startProcess() {
         if (running.get()) return;
 
-        String jar    = jarPathField.getText().trim();
-        File   jarFile = new File(jar);
-
+        String jar = jarPathField.getText().trim();
+        File jarFile = new File(jar);
         if (!jarFile.exists()) {
             appendLog("[GUI] ERROR: JAR not found at: " + jar, TEXT_ERROR);
-            appendLog("[GUI] Click Browse... to locate MCXboxBroadcastStandalone.jar", TEXT_WARN);
+            appendLog("[GUI] Click Browse... in the Launcher tab to locate it", TEXT_WARN);
             return;
+        }
+
+        // Auto-save config before starting if remote-address has been changed
+        if (!"auto".equals(cfgRemoteAddress.getText().trim())) {
+            saveConfigToDisk();
+        } else {
+            File cf = getConfigFile();
+            if (!cf.exists()) {
+                appendLog("[GUI] Warning: No config.yml exists and remote-address is 'auto'.", TEXT_WARN);
+                appendLog("[GUI] Go to the Server tab, set your server's IP, and click Save.", TEXT_WARN);
+            }
         }
 
         int heapMb = (int) heapSpinner.getValue();
         stopping.set(false);
         running.set(true);
         setStatus("Starting...", ACCENT_YELLOW);
-
-        SwingUtilities.invokeLater(() -> {
-            if (authBarRef != null) authBarRef.setVisible(false);
-        });
+        SwingUtilities.invokeLater(() -> { if (authBarRef != null) authBarRef.setVisible(false); });
 
         File workDir = jarFile.getParentFile() != null ? jarFile.getParentFile() : new File(".");
+        String javaExe = findJavaExecutable();
 
         ProcessBuilder pb = new ProcessBuilder(
-            "java", "-Xms64m", "-Xmx" + heapMb + "m", "-jar", jarFile.getAbsolutePath()
+                javaExe, "-Xms64m", "-Xmx" + heapMb + "m",
+                "-jar", jarFile.getAbsolutePath()
         );
         pb.directory(workDir);
         pb.redirectErrorStream(true);
 
         appendLog("[GUI] Working dir: " + workDir.getAbsolutePath(), TEXT_MUTED);
-        appendLog("[GUI] Command: java -Xmx" + heapMb + "m -jar " + jarFile.getName(), TEXT_MUTED);
+        appendLog("[GUI] Command: " + javaExe + " -Xmx" + heapMb + "m -jar " + jarFile.getName(), TEXT_MUTED);
 
         scheduler.submit(() -> {
             try {
                 process = pb.start();
                 processStdin = new PrintWriter(
-                    new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8), true);
+                        new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8), true);
 
                 SwingUtilities.invokeLater(() -> {
-                    startStopBtn.setText("■   Stop");
+                    startStopBtn.setText("\u25A0  Stop");
                     restartBtn.setEnabled(true);
                     jarPathField.setEnabled(false);
                     heapSpinner.setEnabled(false);
                 });
 
-                // Stream all output
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                     String line;
@@ -513,12 +698,9 @@ public class MCXboxBroadcastGUI extends JFrame {
                 int exitCode = process.waitFor();
                 running.set(false);
 
-                // Cancel timed restart timer when process stops
-                cancelTimedRestart();
-
                 SwingUtilities.invokeLater(() -> {
                     appendLog("[GUI] Process exited with code " + exitCode, TEXT_MUTED);
-                    startStopBtn.setText("▶   Start");
+                    startStopBtn.setText("\u25B6  Start");
                     restartBtn.setEnabled(false);
                     jarPathField.setEnabled(true);
                     heapSpinner.setEnabled(true);
@@ -526,11 +708,9 @@ public class MCXboxBroadcastGUI extends JFrame {
                     setStatus("Stopped", ACCENT_RED);
                 });
 
-                // Crash auto-restart watchdog
                 if (!stopping.get() && autoRestartCb.isSelected()) {
                     scheduleAutoRestart((int) cooldownSpinner.getValue());
                 }
-
             } catch (IOException ex) {
                 running.set(false);
                 appendLog("[GUI] Failed to launch: " + ex.getMessage(), TEXT_ERROR);
@@ -543,10 +723,26 @@ public class MCXboxBroadcastGUI extends JFrame {
         });
     }
 
+    private String findJavaExecutable() {
+        String appDir = getAppDirectory();
+        if (appDir != null) {
+            File bundledJava = new File(appDir,
+                    "runtime" + File.separator + "bin" + File.separator + "java.exe");
+            if (bundledJava.exists()) return bundledJava.getAbsolutePath();
+
+            File parentDir = new File(appDir).getParentFile();
+            if (parentDir != null) {
+                bundledJava = new File(parentDir,
+                        "runtime" + File.separator + "bin" + File.separator + "java.exe");
+                if (bundledJava.exists()) return bundledJava.getAbsolutePath();
+            }
+        }
+        return "java";
+    }
+
     private void stopProcess(boolean userInitiated) {
         if (!running.get()) return;
         if (userInitiated) stopping.set(true);
-        cancelTimedRestart();
         if (countdownFuture != null) { countdownFuture.cancel(false); countdownFuture = null; }
         if (processStdin != null) processStdin.println("exit");
         scheduler.schedule(() -> {
@@ -554,17 +750,22 @@ public class MCXboxBroadcastGUI extends JFrame {
         }, 4, TimeUnit.SECONDS);
     }
 
-    /** Manual restart button — also resets the timed restart countdown. */
-    private void doRestartNow() {
+    private void doRestart() {
         if (!running.get()) { startProcess(); return; }
-        appendLog("[GUI] Manual restart triggered...", ACCENT_YELLOW);
-        doSessionRestartCommand();
-        // Reset the timed restart clock so the next timed restart is a full interval away
-        if (timedRestartCb.isSelected()) armTimedRestart();
+        appendLog("[GUI] Sending restart command...", ACCENT_YELLOW);
+        setStatus("Restarting...", ACCENT_YELLOW);
+        if (processStdin != null) processStdin.println("restart");
+        scheduler.schedule(() -> {
+            if (!running.get() && !stopping.get()) {
+                SwingUtilities.invokeLater(this::startProcess);
+            } else {
+                SwingUtilities.invokeLater(() -> setStatus("Running", ACCENT_GREEN));
+            }
+        }, 8, TimeUnit.SECONDS);
     }
 
     private void scheduleAutoRestart(int delaySecs) {
-        appendLog("[GUI] Auto-restart watchdog — restarting in " + delaySecs + " s...", ACCENT_YELLOW);
+        appendLog("[GUI] Auto-restart watchdog \u2014 restarting in " + delaySecs + " s...", ACCENT_YELLOW);
         setStatus("Restarting in " + delaySecs + " s", ACCENT_YELLOW);
         final int[] remaining = {delaySecs};
         countdownFuture = scheduler.scheduleAtFixedRate(() -> {
@@ -583,18 +784,17 @@ public class MCXboxBroadcastGUI extends JFrame {
         else               startProcess();
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     //  LOG PROCESSING
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
-    private static final Pattern ANSI_PATTERN =
-        Pattern.compile("\u001B\\[[;\\d]*[A-Za-z]|\\[\\d+[;m][\\d;]*m?");
+    private static final Pattern ANSI_PATTERN = Pattern.compile("\u001B\\[[;\\d]*[A-Za-z]|\\[\\d+[;m][\\d;]*m?");
 
     private void processLine(String raw) {
         String clean = ANSI_PATTERN.matcher(raw).replaceAll("").trim();
         if (clean.isEmpty()) return;
 
-        Color  color = TEXT_PRIMARY;
+        Color color = TEXT_PRIMARY;
         String lower = clean.toLowerCase();
 
         if (lower.contains("[error]") || lower.contains("exception") || lower.contains("failed"))
@@ -606,28 +806,19 @@ public class MCXboxBroadcastGUI extends JFrame {
 
         if (lower.contains("creation of xbox live session was successful")
                 || lower.contains("created session")
-                || lower.contains("session created")) {
-            color = ACCENT_GREEN;
-            SwingUtilities.invokeLater(() -> {
-                setStatus("Running", ACCENT_GREEN);
-                // Arm timed restart once session is confirmed live
-                if (timedRestartCb.isSelected() && timedRestartFuture == null) {
-                    armTimedRestart();
-                }
-            });
-        }
-
-        if (lower.contains("updated session")) {
-            color = ACCENT_GREEN;
+                || lower.contains("session created")
+                || lower.contains("updated session")) {
+            if (lower.contains("successful") || lower.contains("created")) {
+                color = ACCENT_GREEN;
+                SwingUtilities.invokeLater(() -> setStatus("Running", ACCENT_GREEN));
+            }
         }
 
         if (lower.contains("microsoft.com/link")) {
             Matcher m = AUTH_CODE_PATTERN.matcher(clean);
             String code = m.find() ? "  Code: " + m.group(1) : "";
-            appendLog("[GUI] Auth required" + code + "  ->  Click the button below", ACCENT_BLUE);
-            SwingUtilities.invokeLater(() -> {
-                if (authBarRef != null) authBarRef.setVisible(true);
-            });
+            appendLog("[GUI] Auth required" + code + " -> Click the button below", ACCENT_BLUE);
+            SwingUtilities.invokeLater(() -> { if (authBarRef != null) authBarRef.setVisible(true); });
         }
 
         appendLog(clean, color);
@@ -654,7 +845,7 @@ public class MCXboxBroadcastGUI extends JFrame {
         String cmd = cmdField.getText().trim();
         if (cmd.isEmpty()) return;
         if (!running.get()) {
-            appendLog("[GUI] Process is not running — start it first.", TEXT_WARN);
+            appendLog("[GUI] Process is not running \u2014 start it first.", TEXT_WARN);
             return;
         }
         appendLog("> " + cmd, ACCENT_GREEN);
@@ -662,9 +853,9 @@ public class MCXboxBroadcastGUI extends JFrame {
         cmdField.setText("");
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
-    //  STATUS
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
+    //  STATUS / FILE CHOOSER / PREFERENCES
+    // ════════════════════════════════════════════════════════════════════════
 
     private void setStatus(String text, Color color) {
         SwingUtilities.invokeLater(() -> {
@@ -673,10 +864,6 @@ public class MCXboxBroadcastGUI extends JFrame {
             statusLabel.setForeground(color);
         });
     }
-
-    // ════════════════════════════════════════════════════════════════════════════
-    //  FILE CHOOSER
-    // ════════════════════════════════════════════════════════════════════════════
 
     private void browseJar() {
         JFileChooser fc = new JFileChooser();
@@ -689,51 +876,47 @@ public class MCXboxBroadcastGUI extends JFrame {
         }
         if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             jarPathField.setText(fc.getSelectedFile().getAbsolutePath());
+            loadConfigFromDisk();
         }
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
-    //  PREFERENCES
-    // ════════════════════════════════════════════════════════════════════════════
-
     private void loadPrefs() {
-        try (InputStream in = new FileInputStream(PREFS_FILE)) { prefs.load(in); }
+        File prefsFile = new File(PREFS_FILE);
+        String appDir = getAppDirectory();
+        if (appDir != null) {
+            File appPrefs = new File(appDir, PREFS_FILE);
+            if (appPrefs.exists()) prefsFile = appPrefs;
+        }
+        try (InputStream in = new FileInputStream(prefsFile)) { prefs.load(in); }
         catch (IOException ignored) {}
     }
 
     private void savePrefs() {
-        if (jarPathField       != null) prefs.setProperty("jar.path",              jarPathField.getText());
-        if (heapSpinner        != null) prefs.setProperty("heap.mb",               heapSpinner.getValue().toString());
-        if (autoRestartCb      != null) prefs.setProperty("auto.restart",          Boolean.toString(autoRestartCb.isSelected()));
-        if (cooldownSpinner    != null) prefs.setProperty("cooldown.s",            cooldownSpinner.getValue().toString());
-        if (timedRestartCb     != null) prefs.setProperty("timed.restart.enabled", Boolean.toString(timedRestartCb.isSelected()));
-        if (timedRestartCombo  != null) prefs.setProperty("timed.restart.idx",     String.valueOf(timedRestartCombo.getSelectedIndex()));
+        if (jarPathField    != null) prefs.setProperty("jar.path",     jarPathField.getText());
+        if (heapSpinner     != null) prefs.setProperty("heap.mb",      heapSpinner.getValue().toString());
+        if (autoRestartCb   != null) prefs.setProperty("auto.restart", Boolean.toString(autoRestartCb.isSelected()));
+        if (cooldownSpinner != null) prefs.setProperty("cooldown.s",   cooldownSpinner.getValue().toString());
         try (OutputStream out = new FileOutputStream(PREFS_FILE)) {
             prefs.store(out, "MCXboxBroadcast GUI preferences");
         } catch (IOException ignored) {}
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
-    //  CLOSE
-    // ════════════════════════════════════════════════════════════════════════════
-
     private void onClose() {
         int choice = JOptionPane.showConfirmDialog(this,
-            "Stop MCXboxBroadcast and exit the launcher?",
-            "Confirm Exit", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                "Stop MCXboxBroadcast and exit the launcher?",
+                "Confirm Exit", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (choice != JOptionPane.YES_OPTION) return;
         savePrefs();
         stopping.set(true);
-        cancelTimedRestart();
         stopProcess(true);
         scheduler.shutdownNow();
         dispose();
         System.exit(0);
     }
 
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
     //  STYLE HELPERS
-    // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
 
     private JLabel sectionLabel(String text) {
         JLabel l = new JLabel(text);
@@ -744,13 +927,22 @@ public class MCXboxBroadcastGUI extends JFrame {
         return l;
     }
 
+    private JLabel descLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setFont(new Font("Segoe UI", Font.ITALIC, 10));
+        l.setForeground(new Color(0x6B7280));
+        l.setBorder(new EmptyBorder(0, 0, 3, 0));
+        l.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return l;
+    }
+
     private void styleTextField(JTextField f) {
         f.setBackground(BG_INPUT);
         f.setForeground(TEXT_PRIMARY);
         f.setCaretColor(TEXT_PRIMARY);
         f.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(0x3B4252)),
-            new EmptyBorder(4, 6, 4, 6)));
+                BorderFactory.createLineBorder(new Color(0x3B4252)),
+                new EmptyBorder(4, 6, 4, 6)));
         f.setAlignmentX(Component.LEFT_ALIGNMENT);
     }
 
@@ -766,6 +958,15 @@ public class MCXboxBroadcastGUI extends JFrame {
         s.setAlignmentX(Component.LEFT_ALIGNMENT);
     }
 
+    private void styleCheckbox(JCheckBox cb, boolean defaultVal) {
+        cb.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        cb.setForeground(TEXT_PRIMARY);
+        cb.setBackground(BG_PANEL);
+        cb.setSelected(defaultVal);
+        cb.setAlignmentX(Component.LEFT_ALIGNMENT);
+        cb.setBorder(new EmptyBorder(2, 0, 2, 0));
+    }
+
     private JButton makeButton(String text, Color fg) {
         JButton b = new JButton(text);
         b.setFont(new Font("Segoe UI", Font.BOLD, 12));
@@ -773,11 +974,12 @@ public class MCXboxBroadcastGUI extends JFrame {
         b.setBackground(new Color(fg.getRed(), fg.getGreen(), fg.getBlue(), 28));
         b.setOpaque(true);
         b.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(fg.getRed(), fg.getGreen(), fg.getBlue(), 110)),
-            new EmptyBorder(5, 12, 5, 12)));
+                BorderFactory.createLineBorder(new Color(fg.getRed(), fg.getGreen(), fg.getBlue(), 110)),
+                new EmptyBorder(5, 12, 5, 12)));
         b.setFocusPainted(false);
         b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         b.setAlignmentX(Component.LEFT_ALIGNMENT);
+
         Color hoverColor = new Color(fg.getRed(), fg.getGreen(), fg.getBlue(), 60);
         Color normColor  = new Color(fg.getRed(), fg.getGreen(), fg.getBlue(), 28);
         b.addMouseListener(new MouseAdapter() {
@@ -788,6 +990,20 @@ public class MCXboxBroadcastGUI extends JFrame {
     }
 
     private static int parseIntSafe(String s, int fallback) {
-        try { return Integer.parseInt(s); } catch (NumberFormatException e) { return fallback; }
+        try { return Integer.parseInt(s.trim()); } catch (Exception e) { return fallback; }
+    }
+
+    private static boolean toBool(String s) {
+        return "true".equalsIgnoreCase(s.trim());
+    }
+
+    private static void setSpinnerSafe(JSpinner spinner, String value) {
+        try {
+            int v = Integer.parseInt(value.trim());
+            SpinnerNumberModel model = (SpinnerNumberModel) spinner.getModel();
+            int min = ((Number) model.getMinimum()).intValue();
+            int max = ((Number) model.getMaximum()).intValue();
+            spinner.setValue(Math.max(min, Math.min(max, v)));
+        } catch (Exception ignored) {}
     }
 }

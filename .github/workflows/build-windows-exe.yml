@@ -1,0 +1,151 @@
+
+
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+
+    steps:
+     
+      - name: Checkout GUI repo
+        uses: actions/checkout@v4
+        with:
+          path: gui-repo
+
+      
+      - name: Checkout Broadcaster repo
+        uses: actions/checkout@v4
+        with:
+          repository: MCXboxBroadcast/Broadcaster
+          ref: master
+          path: broadcaster
+
+      
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      
+      - name: Build Broadcaster Standalone JAR
+        working-directory: broadcaster
+        run: |
+          ./gradlew.bat :bootstrap-standalone:build --no-daemon
+          echo "=== Looking for standalone JAR ==="
+          Get-ChildItem -Recurse -Filter "*.jar" | Where-Object { $_.Name -match "standalone" -or $_.Name -match "Standalone" } | ForEach-Object { Write-Output $_.FullName }
+
+      
+      - name: Locate standalone JAR
+        id: find-jar
+        working-directory: broadcaster
+        run: |
+          # The shadow/fat JAR is typically in bootstrap/standalone/build/libs/
+          $jar = Get-ChildItem -Recurse -Filter "*standalone*all*.jar" | Select-Object -First 1
+          if (-not $jar) {
+            $jar = Get-ChildItem -Recurse -Filter "*standalone*.jar" -Path "bootstrap/standalone/build/libs" | 
+                   Where-Object { $_.Name -notmatch "sources|javadoc" } |
+                   Sort-Object Length -Descending |
+                   Select-Object -First 1
+          }
+          if (-not $jar) {
+            $jar = Get-ChildItem -Recurse -Filter "*Standalone*.jar" -Path "bootstrap" | 
+                   Where-Object { $_.Name -notmatch "sources|javadoc" } |
+                   Sort-Object Length -Descending |
+                   Select-Object -First 1
+          }
+          if (-not $jar) {
+            Write-Error "Could not find standalone JAR!"
+            exit 1
+          }
+          Write-Output "Found JAR: $($jar.FullName)"
+          echo "JAR_PATH=$($jar.FullName)" >> $env:GITHUB_OUTPUT
+
+     
+      - name: Prepare package directory
+        run: |
+          New-Item -ItemType Directory -Force -Path "package/app"
+          New-Item -ItemType Directory -Force -Path "package/gui-classes"
+
+          
+          Copy-Item "${{ steps.find-jar.outputs.JAR_PATH }}" -Destination "package/app/MCXboxBroadcastStandalone.jar"
+
+         
+          Copy-Item "gui-repo/MCXboxBroadcastGUI.java" -Destination "package/"
+
+      
+      - name: Compile GUI
+        working-directory: package
+        run: |
+          javac -source 17 -target 17 -d gui-classes MCXboxBroadcastGUI.java
+
+      
+      - name: Create GUI JAR
+        working-directory: package
+        run: |
+          # Create manifest
+          @"
+          Main-Class: MCXboxBroadcastGUI
+          "@ | Set-Content -Path "MANIFEST.MF" -Encoding ASCII
+
+          
+          jar cfm gui-classes/MCXboxBroadcastGUI.jar MANIFEST.MF -C gui-classes .
+          Write-Output "GUI JAR created successfully"
+
+      
+      - name: Build EXE with jpackage
+        working-directory: package
+        run: |
+          # Create an input directory with both JARs
+          New-Item -ItemType Directory -Force -Path "jpackage-input"
+          Copy-Item "gui-classes/MCXboxBroadcastGUI.jar" -Destination "jpackage-input/"
+          Copy-Item "app/MCXboxBroadcastStandalone.jar" -Destination "jpackage-input/"
+
+          
+          jpackage `
+            --type app-image `
+            --name "MCXboxBroadcast" `
+            --app-version "1.0.0" `
+            --vendor "MCXboxBroadcast" `
+            --description "MCXboxBroadcast - Xbox Live Server Broadcaster with GUI" `
+            --input jpackage-input `
+            --main-jar MCXboxBroadcastGUI.jar `
+            --main-class MCXboxBroadcastGUI `
+            --dest output `
+            --java-options "-Xms64m" `
+            --java-options "-Xmx512m" `
+            --win-console
+
+          Write-Output "=== jpackage output ==="
+          Get-ChildItem -Recurse output | ForEach-Object { Write-Output $_.FullName }
+
+     
+      - name: Create distribution ZIP
+        run: |
+          Compress-Archive -Path "package/output/MCXboxBroadcast/*" -DestinationPath "MCXboxBroadcast-Windows.zip"
+          Write-Output "Distribution ZIP created: MCXboxBroadcast-Windows.zip"
+          Write-Output "Size: $((Get-Item 'MCXboxBroadcast-Windows.zip').Length / 1MB) MB"
+
+      
+      - name: Upload Windows EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MCXboxBroadcast-Windows
+          path: MCXboxBroadcast-Windows.zip
+          retention-days: 90
+
+      
+      - name: Upload app directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: MCXboxBroadcast-AppImage
+          path: package/output/MCXboxBroadcast/
+          retention-days: 30
