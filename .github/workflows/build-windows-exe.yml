@@ -85,7 +85,7 @@ jobs:
       - name: Compile GUI
         working-directory: package
         run: |
-          javac -source 17 -target 17 -d gui-classes MCXboxBroadcastGUI.java
+          javac -encoding UTF-8 -source 17 -target 17 -d gui-classes MCXboxBroadcastGUI.java
 
       
       - name: Create GUI JAR
