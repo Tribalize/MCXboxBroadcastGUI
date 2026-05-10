@@ -277,7 +277,7 @@ public class MCXboxBroadcastGUI extends JFrame {
         authBarRef.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, ACCENT_BLUE));
         authBarRef.add(authHint);
         authBarRef.add(openBrowserBtn);
-        authBarRef.setVisible(false);
+        authBarRef.setVisible(true);
         add(authBarRef, BorderLayout.SOUTH);
 
         // Welcome
@@ -662,7 +662,6 @@ public class MCXboxBroadcastGUI extends JFrame {
         stopping.set(false);
         running.set(true);
         setStatus("Starting...", ACCENT_YELLOW);
-        SwingUtilities.invokeLater(() -> { if (authBarRef != null) authBarRef.setVisible(false); });
 
         File workDir = jarFile.getParentFile() != null ? jarFile.getParentFile() : new File(".");
         String javaExe = findJavaExecutable();
@@ -707,7 +706,6 @@ public class MCXboxBroadcastGUI extends JFrame {
                     restartBtn.setEnabled(false);
                     jarPathField.setEnabled(true);
                     heapSpinner.setEnabled(true);
-                    if (authBarRef != null) authBarRef.setVisible(false);
                     setStatus("Stopped", ACCENT_RED);
                 });
 
