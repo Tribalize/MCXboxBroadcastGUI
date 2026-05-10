@@ -209,13 +209,16 @@ public class MCXboxBroadcastGUI extends JFrame {
         sidebarTabs = new JTabbedPane(JTabbedPane.TOP);
         sidebarTabs.setFont(new Font("Segoe UI", Font.BOLD, 11));
         sidebarTabs.setBackground(BG_PANEL);
-        sidebarTabs.setForeground(TEXT_PRIMARY);
+        sidebarTabs.setForeground(Color.BLACK);
         sidebarTabs.setPreferredSize(new Dimension(260, 0));
 
         sidebarTabs.addTab("Launcher", buildLauncherTab());
         sidebarTabs.addTab("Server", buildServerConfigTab());
         sidebarTabs.addTab("Friends", buildFriendConfigTab());
         sidebarTabs.addTab("Webhook", buildSlackConfigTab());
+        for (int i = 0; i < sidebarTabs.getTabCount(); i++) {
+            sidebarTabs.setForegroundAt(i, Color.BLACK);
+        }
 
         add(sidebarTabs, BorderLayout.WEST);
 
