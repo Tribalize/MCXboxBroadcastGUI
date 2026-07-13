@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to publish, for example v1.0.0'
+        description: 'Release tag to publish, for example v1.0.1'
         required: true
-        default: 'v1.0.0'
+        default: 'v1.0.1'
       prerelease:
         description: 'Mark this GitHub Release as a prerelease'
         required: true
@@ -33,7 +33,7 @@ jobs:
       - name: Checkout Broadcaster repo
         uses: actions/checkout@v4
         with:
-          repository: MCXboxBroadcast/Broadcaster
+          repository: Tribalize/MCXboxBroadcast
           ref: master
           path: broadcaster
 
@@ -122,7 +122,7 @@ jobs:
           jpackage `
             --type app-image `
             --name "MCXboxBroadcast" `
-            --app-version "1.0.0" `
+            --app-version "1.0.1" `
             --vendor "MCXboxBroadcast" `
             --description "MCXboxBroadcast - Xbox Live Server Broadcaster with GUI" `
             --input jpackage-input `
