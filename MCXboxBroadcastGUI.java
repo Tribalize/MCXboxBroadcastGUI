@@ -519,20 +519,26 @@ public class MCXboxBroadcastGUI extends JFrame {
         try {
             java.util.List<String> lines = Files.readAllLines(configFile.toPath(), StandardCharsets.UTF_8);
             String section = "";
+            String subsection = "";
 
             for (String raw : lines) {
                 String trimmed = raw.trim();
                 if (trimmed.startsWith("#") || trimmed.isEmpty()) continue;
 
-                if (!raw.startsWith(" ") && !raw.startsWith("\t") && trimmed.endsWith(":") && !trimmed.contains(": ")) {
+                int indent = countLeadingWhitespace(raw);
+                if (indent == 0 && trimmed.endsWith(":") && !trimmed.contains(": ")) {
                     section = trimmed.substring(0, trimmed.length() - 1).trim();
+                    subsection = "";
+                    continue;
+                }
+                if (indent > 0 && indent <= 2 && trimmed.endsWith(":") && !trimmed.contains(": ")) {
+                    subsection = trimmed.substring(0, trimmed.length() - 1).trim();
                     continue;
                 }
 
                 String key = trimmed.contains(":") ? trimmed.substring(0, trimmed.indexOf(':')).trim() : "";
                 String value = trimmed.contains(":") ? trimmed.substring(trimmed.indexOf(':') + 1).trim() : "";
-                if (value.startsWith("\"") && value.endsWith("\""))
-                    value = value.substring(1, value.length() - 1);
+                value = unquote(value);
 
                 switch (section) {
                     case "":
@@ -542,18 +548,41 @@ public class MCXboxBroadcastGUI extends JFrame {
                             case "update-interval": setSpinnerSafe(cfgUpdateInterval, value); break;
                         }
                         break;
+                    case "session":
+                        if ("session-info".equals(subsection)) {
+                            switch (key) {
+                                case "ip":   cfgRemoteAddress.setText(value); break;
+                                case "port": cfgRemotePort.setText(value); break;
+                            }
+                        } else {
+                            switch (key) {
+                                case "remote-address":  cfgRemoteAddress.setText(value); break;
+                                case "remote-port":     cfgRemotePort.setText(value); break;
+                                case "update-interval": setSpinnerSafe(cfgUpdateInterval, value); break;
+                            }
+                        }
+                        break;
                     case "friend-sync":
-                        switch (key) {
-                            case "update-interval": setSpinnerSafe(cfgFriendSyncInterval, value); break;
-                            case "auto-follow":     cfgAutoFollow.setSelected(toBool(value)); break;
-                            case "auto-unfollow":   cfgAutoUnfollow.setSelected(toBool(value)); break;
-                            case "initial-invite":  cfgInitialInvite.setSelected(toBool(value)); break;
-                            case "should-expire":   cfgShouldExpire.setSelected(toBool(value)); break;
-                            case "expire-days":     setSpinnerSafe(cfgExpireDays, value); break;
-                            case "expire-check":    setSpinnerSafe(cfgExpireCheck, value); break;
+                        if ("expiry".equals(subsection)) {
+                            switch (key) {
+                                case "enabled": cfgShouldExpire.setSelected(toBool(value)); break;
+                                case "days":    setSpinnerSafe(cfgExpireDays, value); break;
+                                case "check":   setSpinnerSafe(cfgExpireCheck, value); break;
+                            }
+                        } else {
+                            switch (key) {
+                                case "update-interval": setSpinnerSafe(cfgFriendSyncInterval, value); break;
+                                case "auto-follow":     cfgAutoFollow.setSelected(toBool(value)); break;
+                                case "auto-unfollow":   cfgAutoUnfollow.setSelected(toBool(value)); break;
+                                case "initial-invite":  cfgInitialInvite.setSelected(toBool(value)); break;
+                                case "should-expire":   cfgShouldExpire.setSelected(toBool(value)); break;
+                                case "expire-days":     setSpinnerSafe(cfgExpireDays, value); break;
+                                case "expire-check":    setSpinnerSafe(cfgExpireCheck, value); break;
+                            }
                         }
                         break;
                     case "slack-webhook":
+                    case "notifications":
                         switch (key) {
                             case "enabled":      cfgSlackEnabled.setSelected(toBool(value)); break;
                             case "webhook-url":  cfgSlackUrl.setText(value); break;
@@ -575,18 +604,28 @@ public class MCXboxBroadcastGUI extends JFrame {
         yaml.append("# MCXboxBroadcast Standalone Configuration\n");
         yaml.append("# Generated by MCXboxBroadcast GUI Launcher\n\n");
 
-        yaml.append("# The IP address to broadcast, you likely want to change this to\n");
-        yaml.append("# your server's public IP\n");
-        yaml.append("remote-address: ").append(cfgRemoteAddress.getText().trim()).append("\n\n");
+        yaml.append("# Do not change!\n");
+        yaml.append("config-version: 2\n\n");
 
-        yaml.append("# The port to broadcast, this should be left as auto unless you're\n");
-        yaml.append("# manipulating the port using network rules or reverse proxies\n");
-        yaml.append("remote-port: ").append(cfgRemotePort.getText().trim()).append("\n\n");
-
-        yaml.append("# The amount of time in seconds to update session information and\n");
-        yaml.append("# sync other data\n");
-        yaml.append("# Warning: This can be no lower than 20 due to xbox rate limits\n");
-        yaml.append("update-interval: ").append(cfgUpdateInterval.getValue()).append("\n\n");
+        yaml.append("# Core session settings\n");
+        yaml.append("session:\n");
+        yaml.append("  # The amount of time in seconds to update session information\n");
+        yaml.append("  # Warning: This can be no lower than 20 due to Xbox rate limits\n");
+        yaml.append("  update-interval: ").append(cfgUpdateInterval.getValue()).append("\n\n");
+        yaml.append("  # Should we query the Bedrock server to sync the session information\n");
+        yaml.append("  query-server: true\n\n");
+        yaml.append("  # Use checker.geysermc.org if the native ping fails\n");
+        yaml.append("  web-query-fallback: false\n\n");
+        yaml.append("  # Fallback to config values if all other server query methods fail\n");
+        yaml.append("  config-fallback: false\n\n");
+        yaml.append("  # The data to broadcast over Xbox Live\n");
+        yaml.append("  session-info:\n");
+        yaml.append("    host-name: \"Geyser Test Server\"\n");
+        yaml.append("    world-name: \"GeyserMC Demo & Test Server\"\n");
+        yaml.append("    players: 0\n");
+        yaml.append("    max-players: 20\n");
+        yaml.append("    ip: \"").append(escapeYaml(cfgRemoteAddress.getText().trim())).append("\"\n");
+        yaml.append("    port: ").append(normalizePort(cfgRemotePort.getText().trim())).append("\n\n");
 
         yaml.append("# Friend/follower list sync settings\n");
         yaml.append("friend-sync:\n");
@@ -598,19 +637,21 @@ public class MCXboxBroadcastGUI extends JFrame {
         yaml.append("  auto-unfollow: ").append(cfgAutoUnfollow.isSelected()).append("\n\n");
         yaml.append("  # Should we automatically send an invite when a friend is added\n");
         yaml.append("  initial-invite: ").append(cfgInitialInvite.isSelected()).append("\n\n");
-        yaml.append("  # Should we unfriend people that haven't joined the server in a while\n");
-        yaml.append("  should-expire: ").append(cfgShouldExpire.isSelected()).append("\n\n");
-        yaml.append("  # The amount of time in days before a friend is considered expired\n");
-        yaml.append("  expire-days: ").append(cfgExpireDays.getValue()).append("\n\n");
-        yaml.append("  # How often to check in seconds for expired friends\n");
-        yaml.append("  expire-check: ").append(cfgExpireCheck.getValue()).append("\n\n");
+        yaml.append("  # Friend expiry settings\n");
+        yaml.append("  expiry:\n");
+        yaml.append("    # Should we unfriend people that haven't joined the server in a while\n");
+        yaml.append("    enabled: ").append(cfgShouldExpire.isSelected()).append("\n\n");
+        yaml.append("    # The amount of time in days before a friend is considered expired\n");
+        yaml.append("    days: ").append(cfgExpireDays.getValue()).append("\n\n");
+        yaml.append("    # How often to check in seconds for expired friends\n");
+        yaml.append("    check: ").append(cfgExpireCheck.getValue()).append("\n\n");
 
         yaml.append("# Slack webhook settings\n");
-        yaml.append("slack-webhook:\n");
+        yaml.append("notifications:\n");
         yaml.append("  # Should we send a message to a slack webhook when the session is updated\n");
         yaml.append("  enabled: ").append(cfgSlackEnabled.isSelected()).append("\n\n");
         yaml.append("  # The webhook url to send the message to\n");
-        yaml.append("  webhook-url: \"").append(cfgSlackUrl.getText().trim()).append("\"\n\n");
+        yaml.append("  webhook-url: \"").append(escapeYaml(cfgSlackUrl.getText().trim())).append("\"\n\n");
         yaml.append("  # The message to send when the session is expired and needs to be updated\n");
         yaml.append("  session-expired-message: |\n");
         yaml.append("    <!here> Xbox Session expired, sign in again to update it.\n\n");
@@ -992,6 +1033,28 @@ public class MCXboxBroadcastGUI extends JFrame {
 
     private static int parseIntSafe(String s, int fallback) {
         try { return Integer.parseInt(s.trim()); } catch (Exception e) { return fallback; }
+    }
+
+    private static int countLeadingWhitespace(String s) {
+        int count = 0;
+        while (count < s.length() && Character.isWhitespace(s.charAt(count))) count++;
+        return count;
+    }
+
+    private static String unquote(String s) {
+        if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) {
+            return s.substring(1, s.length() - 1).replace("\\\"", "\"").replace("\\\\", "\\");
+        }
+        return s;
+    }
+
+    private static String escapeYaml(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static int normalizePort(String s) {
+        if (s == null || s.trim().isEmpty() || "auto".equalsIgnoreCase(s.trim())) return 19132;
+        return Math.max(1, Math.min(65535, parseIntSafe(s, 19132)));
     }
 
     private static boolean toBool(String s) {
