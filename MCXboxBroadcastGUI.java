@@ -78,7 +78,10 @@ public class MCXboxBroadcastGUI extends JFrame {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3);
     private final AtomicBoolean running  = new AtomicBoolean(false);
     private final AtomicBoolean stopping = new AtomicBoolean(false);
+    private final AtomicBoolean staleReconnectCheckQueued = new AtomicBoolean(false);
     private ScheduledFuture<?> countdownFuture;
+    private volatile long lastSessionUpdateMillis = 0L;
+    private static final long STALE_RECONNECT_GRACE_MS = 120_000L;
 
     // ── Auth detection ───────────────────────────────────────────────────────
     private static final Pattern AUTH_CODE_PATTERN =
@@ -701,6 +704,8 @@ public class MCXboxBroadcastGUI extends JFrame {
 
         int heapMb = (int) heapSpinner.getValue();
         stopping.set(false);
+        staleReconnectCheckQueued.set(false);
+        lastSessionUpdateMillis = System.currentTimeMillis();
         running.set(true);
         setStatus("Starting...", ACCENT_YELLOW);
 
@@ -794,6 +799,7 @@ public class MCXboxBroadcastGUI extends JFrame {
 
     private void doRestart() {
         if (!running.get()) { startProcess(); return; }
+        staleReconnectCheckQueued.set(false);
         appendLog("[GUI] Sending restart command...", ACCENT_YELLOW);
         setStatus("Restarting...", ACCENT_YELLOW);
         if (processStdin != null) processStdin.println("restart");
@@ -850,10 +856,18 @@ public class MCXboxBroadcastGUI extends JFrame {
                 || lower.contains("created session")
                 || lower.contains("session created")
                 || lower.contains("updated session")) {
+            lastSessionUpdateMillis = System.currentTimeMillis();
+            staleReconnectCheckQueued.set(false);
             if (lower.contains("successful") || lower.contains("created")) {
                 color = ACCENT_GREEN;
                 SwingUtilities.invokeLater(() -> setStatus("Running", ACCENT_GREEN));
             }
+        }
+
+        if (lower.contains("connection to websocket lost")
+                || lower.contains("re-creating session")
+                || lower.contains("recreating session")) {
+            scheduleStaleReconnectCheck();
         }
 
         if (lower.contains("microsoft.com/link")) {
@@ -864,6 +878,31 @@ public class MCXboxBroadcastGUI extends JFrame {
         }
 
         appendLog(clean, color);
+    }
+
+    private void scheduleStaleReconnectCheck() {
+        if (!autoRestartCb.isSelected() || stopping.get() || !running.get()) return;
+        if (!staleReconnectCheckQueued.compareAndSet(false, true)) return;
+
+        long observedUpdate = lastSessionUpdateMillis;
+        appendLog("[GUI] Websocket reconnect detected; checking for a fresh session update in "
+                + (STALE_RECONNECT_GRACE_MS / 1000) + " s...", ACCENT_YELLOW);
+
+        scheduler.schedule(() -> {
+            if (stopping.get() || !running.get() || !autoRestartCb.isSelected()) {
+                staleReconnectCheckQueued.set(false);
+                return;
+            }
+
+            boolean noFreshUpdate = lastSessionUpdateMillis <= observedUpdate;
+            if (noFreshUpdate) {
+                appendLog("[GUI] Session did not update after reconnect; restarting broadcast session.", TEXT_WARN);
+                doRestart();
+            } else {
+                appendLog("[GUI] Session updated after reconnect; no restart needed.", TEXT_MUTED);
+                staleReconnectCheckQueued.set(false);
+            }
+        }, STALE_RECONNECT_GRACE_MS, TimeUnit.MILLISECONDS);
     }
 
     private void appendLog(String text, Color color) {
