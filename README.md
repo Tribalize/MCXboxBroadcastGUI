@@ -15,7 +15,7 @@ This project is only a GUI wrapper. Full credit for the broadcaster itself goes 
 - Stale session recovery when the Xbox websocket reconnects but the broadcast session does not refresh.
 - Microsoft/Xbox sign-in helper with device-code detection and a one-click login page.
 - Expired Xbox login recovery that pauses restart loops, asks for re-auth, and resumes the session after sign-in.
-
+-After the account is successfully authenticated, the launcher waits briefly, then automatically restarts the broadcast session to refresh NetherNet
 ## Download
 
 The easiest way to use the launcher is from the GitHub Releases page.
