@@ -956,17 +956,12 @@ public class MCXboxBroadcastGUI extends JFrame {
         if (!running.get() || stopping.get()) return;
         if (!authResumeCheckQueued.compareAndSet(false, true)) return;
 
-        long observedUpdate = lastSessionUpdateMillis;
         scheduler.schedule(() -> {
             authResumeCheckQueued.set(false);
             if (!running.get() || stopping.get()) return;
 
-            if (lastSessionUpdateMillis <= observedUpdate) {
-                appendLog("[GUI] Auth completed; restarting session to resume broadcasting.", ACCENT_YELLOW);
-                doRestart();
-            } else {
-                appendLog("[GUI] Broadcast session resumed after auth.", TEXT_MUTED);
-            }
+            appendLog("[GUI] Auth completed; restarting session to refresh NetherNet.", ACCENT_YELLOW);
+            doRestart();
         }, AUTH_RESUME_GRACE_MS, TimeUnit.MILLISECONDS);
     }
 
