@@ -79,13 +79,19 @@ public class MCXboxBroadcastGUI extends JFrame {
     private final AtomicBoolean running  = new AtomicBoolean(false);
     private final AtomicBoolean stopping = new AtomicBoolean(false);
     private final AtomicBoolean staleReconnectCheckQueued = new AtomicBoolean(false);
+    private final AtomicBoolean authRecoveryMode = new AtomicBoolean(false);
+    private final AtomicBoolean authBrowserOpened = new AtomicBoolean(false);
+    private final AtomicBoolean authResumeCheckQueued = new AtomicBoolean(false);
     private ScheduledFuture<?> countdownFuture;
     private volatile long lastSessionUpdateMillis = 0L;
     private static final long STALE_RECONNECT_GRACE_MS = 120_000L;
+    private static final long AUTH_RESUME_GRACE_MS = 30_000L;
 
     // ── Auth detection ───────────────────────────────────────────────────────
     private static final Pattern AUTH_CODE_PATTERN =
             Pattern.compile("enter the code ([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AUTH_URL_PATTERN =
+            Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE);
     private String lastAuthUrl = "https://www.microsoft.com/link";
 
     // ── Preferences ──────────────────────────────────────────────────────────
@@ -280,7 +286,7 @@ public class MCXboxBroadcastGUI extends JFrame {
         authBarRef.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, ACCENT_BLUE));
         authBarRef.add(authHint);
         authBarRef.add(openBrowserBtn);
-        authBarRef.setVisible(true);
+        authBarRef.setVisible(false);
         add(authBarRef, BorderLayout.SOUTH);
 
         // Welcome
@@ -705,6 +711,9 @@ public class MCXboxBroadcastGUI extends JFrame {
         int heapMb = (int) heapSpinner.getValue();
         stopping.set(false);
         staleReconnectCheckQueued.set(false);
+        authRecoveryMode.set(false);
+        authBrowserOpened.set(false);
+        authResumeCheckQueued.set(false);
         lastSessionUpdateMillis = System.currentTimeMillis();
         running.set(true);
         setStatus("Starting...", ACCENT_YELLOW);
@@ -756,7 +765,12 @@ public class MCXboxBroadcastGUI extends JFrame {
                 });
 
                 if (!stopping.get() && autoRestartCb.isSelected()) {
-                    scheduleAutoRestart((int) cooldownSpinner.getValue());
+                    if (authRecoveryMode.get()) {
+                        SwingUtilities.invokeLater(() -> setStatus("Re-auth required", ACCENT_YELLOW));
+                        appendLog("[GUI] Waiting for Xbox sign-in before restarting.", TEXT_WARN);
+                    } else {
+                        scheduleAutoRestart((int) cooldownSpinner.getValue());
+                    }
                 }
             } catch (IOException ex) {
                 running.set(false);
@@ -858,6 +872,9 @@ public class MCXboxBroadcastGUI extends JFrame {
                 || lower.contains("updated session")) {
             lastSessionUpdateMillis = System.currentTimeMillis();
             staleReconnectCheckQueued.set(false);
+            authRecoveryMode.set(false);
+            authResumeCheckQueued.set(false);
+            authBrowserOpened.set(false);
             if (lower.contains("successful") || lower.contains("created")) {
                 color = ACCENT_GREEN;
                 SwingUtilities.invokeLater(() -> setStatus("Running", ACCENT_GREEN));
@@ -870,14 +887,87 @@ public class MCXboxBroadcastGUI extends JFrame {
             scheduleStaleReconnectCheck();
         }
 
+        if (lower.contains("invalid_grant") || lower.contains("grant is expired")
+                || lower.contains("must sign in again")) {
+            handleExpiredAuth();
+            color = TEXT_ERROR;
+        }
+
         if (lower.contains("microsoft.com/link")) {
             Matcher m = AUTH_CODE_PATTERN.matcher(clean);
             String code = m.find() ? "  Code: " + m.group(1) : "";
+            Matcher url = AUTH_URL_PATTERN.matcher(clean);
+            if (url.find()) {
+                lastAuthUrl = url.group();
+            }
             appendLog("[GUI] Auth required" + code + " -> Click the button below", ACCENT_BLUE);
-            SwingUtilities.invokeLater(() -> { if (authBarRef != null) authBarRef.setVisible(true); });
+            SwingUtilities.invokeLater(() -> {
+                setStatus("Re-auth required", ACCENT_YELLOW);
+                if (authBarRef != null) authBarRef.setVisible(true);
+            });
+            openAuthPageOnce();
+        }
+
+        if (lower.contains("successfully authenticated")) {
+            handleAuthSuccess();
+            color = ACCENT_GREEN;
         }
 
         appendLog(clean, color);
+    }
+
+    private void handleExpiredAuth() {
+        if (authRecoveryMode.compareAndSet(false, true)) {
+            appendLog("[GUI] Xbox login expired. Re-authorize this account to resume broadcasting.", TEXT_WARN);
+        }
+        staleReconnectCheckQueued.set(false);
+        SwingUtilities.invokeLater(() -> {
+            setStatus("Re-auth required", ACCENT_YELLOW);
+            if (authBarRef != null) authBarRef.setVisible(true);
+        });
+    }
+
+    private void openAuthPageOnce() {
+        if (!authBrowserOpened.compareAndSet(false, true)) return;
+        SwingUtilities.invokeLater(() -> {
+            try {
+                Desktop.getDesktop().browse(new URI(lastAuthUrl));
+                appendLog("[GUI] Opened Microsoft login page in your browser.", ACCENT_BLUE);
+            } catch (Exception ex) {
+                appendLog("[GUI] Could not open browser: " + ex.getMessage(), TEXT_ERROR);
+            }
+        });
+    }
+
+    private void handleAuthSuccess() {
+        boolean recovering = authRecoveryMode.getAndSet(false);
+        authBrowserOpened.set(false);
+        SwingUtilities.invokeLater(() -> {
+            if (authBarRef != null) authBarRef.setVisible(false);
+            setStatus("Authenticated", ACCENT_GREEN);
+        });
+        appendLog("[GUI] Xbox account authenticated.", ACCENT_GREEN);
+        if (recovering) {
+            scheduleAuthResumeCheck();
+        }
+    }
+
+    private void scheduleAuthResumeCheck() {
+        if (!running.get() || stopping.get()) return;
+        if (!authResumeCheckQueued.compareAndSet(false, true)) return;
+
+        long observedUpdate = lastSessionUpdateMillis;
+        scheduler.schedule(() -> {
+            authResumeCheckQueued.set(false);
+            if (!running.get() || stopping.get()) return;
+
+            if (lastSessionUpdateMillis <= observedUpdate) {
+                appendLog("[GUI] Auth completed; restarting session to resume broadcasting.", ACCENT_YELLOW);
+                doRestart();
+            } else {
+                appendLog("[GUI] Broadcast session resumed after auth.", TEXT_MUTED);
+            }
+        }, AUTH_RESUME_GRACE_MS, TimeUnit.MILLISECONDS);
     }
 
     private void scheduleStaleReconnectCheck() {

@@ -6,6 +6,16 @@ MCXboxBroadcastGUI is a Windows GUI wrapper for self-hosting with MCXboxBroadcas
 
 This project is only a GUI wrapper. Full credit for the broadcaster itself goes to [MCXboxBroadcast/Broadcaster](https://github.com/MCXboxBroadcast/Broadcaster).
 
+## Features
+
+- Windows launcher for the MCXboxBroadcast standalone JAR.
+- Built-in `config.yml` editor for server, friends, and webhook settings.
+- Bundled JAR/runtime detection for packaged releases.
+- Auto-restart watchdog for crashes and normal process exits.
+- Stale session recovery when the Xbox websocket reconnects but the broadcast session does not refresh.
+- Microsoft/Xbox sign-in helper with device-code detection and a one-click login page.
+- Expired Xbox login recovery that pauses restart loops, asks for re-auth, and resumes the session after sign-in.
+
 ## Download
 
 The easiest way to use the launcher is from the GitHub Releases page.
@@ -46,3 +56,15 @@ The Windows package is built manually from the Actions page. It does not build o
 6. Click **Run workflow**.
 
 When the workflow finishes, it uploads `MCXboxBroadcast-Windows.zip` to the Releases page using the release tag you entered.
+
+## Troubleshooting
+
+### Xbox login expired
+
+If the launcher shows `Re-auth required`, the saved Microsoft/Xbox login has expired and Microsoft requires the account to sign in again. This cannot be completed silently in the background.
+
+When MCXboxBroadcast prints a Microsoft device-code login message, the launcher shows the auth banner and opens the Microsoft login page. Sign in with the Xbox account and enter the displayed code. After the log shows the account was successfully authenticated, the launcher waits briefly for the broadcast session to resume and restarts the session automatically if needed.
+
+### Session says online but players cannot join
+
+If the Xbox websocket reconnects but MCXboxBroadcast does not publish a fresh session update, players may see the account as offline or fail to connect even though the process still appears to be running. With auto-restart enabled, the launcher watches for that stale reconnect state and restarts the broadcast session automatically if it does not recover.
