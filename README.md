@@ -15,17 +15,36 @@ This project is only a GUI wrapper. Full credit for the broadcaster itself goes 
 - Stale session recovery when the Xbox websocket reconnects but the broadcast session does not refresh.
 - Microsoft/Xbox sign-in helper with device-code detection and a one-click login page.
 - Expired Xbox login recovery that pauses restart loops, asks for re-auth, and resumes the session after sign-in.
--After the account is successfully authenticated, the launcher waits briefly, then automatically restarts the broadcast session to refresh NetherNet
+- After the account is successfully authenticated, the launcher waits briefly, then automatically restarts the broadcast session to refresh NetherNet.
+
 ## Download
 
 The easiest way to use the launcher is from the GitHub Releases page.
 
 1. Open the repository's **Releases** page.
-2. Download `MCXboxBroadcast-Windows.zip` from the latest release assets.
-3. Extract the ZIP file.
-4. Run the MCXboxBroadcast launcher from the extracted folder.
+2. Download `MCXboxBroadcast-Windows.zip` from the release that includes the Bedrock version you need.
+3. Extract the whole ZIP to a normal writable folder, such as your Downloads folder. Do not run it from inside the ZIP.
+4. Open the extracted `MCXboxBroadcast` folder and run `MCXboxBroadcast.exe`.
 
-The release package includes the GUI app image and the bundled MCXboxBroadcast standalone JAR built by GitHub Actions.
+The extracted folder is an application bundle. Start only `MCXboxBroadcast.exe`; do not run the JAR files inside `app` directly.
+
+Keep the following files and folders together in the extracted `MCXboxBroadcast` folder:
+
+- `MCXboxBroadcast.exe` -- starts the GUI.
+- `app` -- contains the GUI files and the bundled `MCXboxBroadcastStandalone.jar` that does the broadcasting.
+- `runtime` (if included) -- the Java runtime used by the packaged launcher.
+
+Moving, deleting, or copying only the `.exe` will prevent the GUI from starting correctly. If the package is moved to another PC, copy the entire extracted `MCXboxBroadcast` folder, including `app` and `runtime`.
+
+## First Start
+
+1. Start `MCXboxBroadcast.exe` from the extracted application folder.
+2. On the **Server** tab, enter the Bedrock server address and port, then save the server configuration.
+3. Leave **Query server before broadcasting** enabled when this PC can reach the server. Turn it off if the server cannot be pinged from this PC (for example, because it is on a different network or blocks status queries).
+4. Start the broadcast. On the first run, the log displays a Microsoft device-login code. Follow the prompt, sign in with the Xbox account that will host the broadcast, and enter that code in the browser.
+5. After authentication completes, leave the GUI running. Players can then join the broadcast session from Minecraft/Xbox.
+
+The release package includes the GUI app image and the matching MCXboxBroadcast standalone JAR built by GitHub Actions. When making a new GUI release, first ensure the broadcaster build is successful; the GUI workflow downloads and bundles that updated standalone JAR automatically.
 
 ## Forking This Repository
 

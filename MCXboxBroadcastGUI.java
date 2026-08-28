@@ -59,6 +59,7 @@ public class MCXboxBroadcastGUI extends JFrame {
     private JTextField cfgRemoteAddress;
     private JTextField cfgRemotePort;
     private JSpinner   cfgUpdateInterval;
+    private JCheckBox  cfgQueryServer;
     private JSpinner   cfgFriendSyncInterval;
     private JCheckBox  cfgAutoFollow;
     private JCheckBox  cfgAutoUnfollow;
@@ -398,6 +399,13 @@ public class MCXboxBroadcastGUI extends JFrame {
         cfgUpdateInterval.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         p.add(cfgUpdateInterval);
 
+        p.add(Box.createVerticalStrut(10));
+        p.add(sectionLabel("SERVER STATUS QUERY"));
+        p.add(descLabel("Turn off when the server cannot be pinged from this PC"));
+        cfgQueryServer = new JCheckBox("Query server before broadcasting");
+        styleCheckbox(cfgQueryServer, true);
+        p.add(cfgQueryServer);
+
         p.add(Box.createVerticalStrut(16));
 
         JButton saveBtn = makeButton("Save Server Config", ACCENT_GREEN);
@@ -568,6 +576,7 @@ public class MCXboxBroadcastGUI extends JFrame {
                                 case "remote-address":  cfgRemoteAddress.setText(value); break;
                                 case "remote-port":     cfgRemotePort.setText(value); break;
                                 case "update-interval": setSpinnerSafe(cfgUpdateInterval, value); break;
+                                case "query-server":    cfgQueryServer.setSelected(toBool(value)); break;
                             }
                         }
                         break;
@@ -622,7 +631,7 @@ public class MCXboxBroadcastGUI extends JFrame {
         yaml.append("  # Warning: This can be no lower than 20 due to Xbox rate limits\n");
         yaml.append("  update-interval: ").append(cfgUpdateInterval.getValue()).append("\n\n");
         yaml.append("  # Should we query the Bedrock server to sync the session information\n");
-        yaml.append("  query-server: true\n\n");
+        yaml.append("  query-server: ").append(cfgQueryServer.isSelected()).append("\n\n");
         yaml.append("  # Use checker.geysermc.org if the native ping fails\n");
         yaml.append("  web-query-fallback: false\n\n");
         yaml.append("  # Fallback to config values if all other server query methods fail\n");
