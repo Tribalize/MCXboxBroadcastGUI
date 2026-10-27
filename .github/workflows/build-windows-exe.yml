@@ -8,7 +8,7 @@ on:
       release_tag:
         description: 'Release tag to publish, for example v1.0.2'
         required: true
-        default: 'v1.1.9'
+        default: 'v1.2.2'
       prerelease:
         description: 'Mark this GitHub Release as a prerelease'
         required: true
@@ -38,11 +38,11 @@ jobs:
           path: broadcaster
 
       
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       
       - name: Build Broadcaster Standalone JAR
@@ -94,7 +94,7 @@ jobs:
       - name: Compile GUI
         working-directory: package
         run: |
-          javac -encoding UTF-8 -source 17 -target 17 -d gui-classes MCXboxBroadcastGUI.java
+          javac -encoding UTF-8 --release 21 -d gui-classes MCXboxBroadcastGUI.java
 
       
       - name: Create GUI JAR
