@@ -58,6 +58,8 @@ public class MCXboxBroadcastGUI extends JFrame {
     // ── UI components ── config editor ───────────────────────────────────────
     private JTextField cfgRemoteAddress;
     private JTextField cfgRemotePort;
+    private JTextField cfgHostName;
+    private JTextField cfgWorldName;
     private JSpinner   cfgUpdateInterval;
     private JCheckBox  cfgQueryServer;
     private JSpinner   cfgFriendSyncInterval;
@@ -223,7 +225,8 @@ public class MCXboxBroadcastGUI extends JFrame {
         sidebarTabs.setPreferredSize(new Dimension(260, 0));
 
         sidebarTabs.addTab("Launcher", buildLauncherTab());
-        sidebarTabs.addTab("Server", buildServerConfigTab());
+        sidebarTabs.addTab("Server", new JScrollPane(buildServerConfigTab(),
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED, JScrollPane.HORIZONTAL_SCROLLBAR_NEVER));
         sidebarTabs.addTab("Friends", buildFriendConfigTab());
         sidebarTabs.addTab("Webhook", buildSlackConfigTab());
         for (int i = 0; i < sidebarTabs.getTabCount(); i++) {
@@ -375,6 +378,21 @@ public class MCXboxBroadcastGUI extends JFrame {
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setBackground(BG_PANEL);
         p.setBorder(new EmptyBorder(12, 10, 12, 10));
+
+        p.add(sectionLabel("HOST NAME"));
+        cfgHostName = new JTextField("Minecraft Server");
+        styleTextField(cfgHostName);
+        cfgHostName.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgHostName);
+
+        p.add(Box.createVerticalStrut(10));
+        p.add(sectionLabel("WORLD NAME"));
+        cfgWorldName = new JTextField("Minecraft World");
+        styleTextField(cfgWorldName);
+        cfgWorldName.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        p.add(cfgWorldName);
+        p.add(descLabel("Server queries may replace these advertised names"));
+        p.add(Box.createVerticalStrut(10));
 
         p.add(sectionLabel("REMOTE ADDRESS"));
         p.add(descLabel("Your server's public IP or domain"));
@@ -568,6 +586,8 @@ public class MCXboxBroadcastGUI extends JFrame {
                     case "session":
                         if ("session-info".equals(subsection)) {
                             switch (key) {
+                                case "host-name": cfgHostName.setText(value); break;
+                                case "world-name": cfgWorldName.setText(value); break;
                                 case "ip":   cfgRemoteAddress.setText(value); break;
                                 case "port": cfgRemotePort.setText(value); break;
                             }
@@ -638,8 +658,8 @@ public class MCXboxBroadcastGUI extends JFrame {
         yaml.append("  config-fallback: false\n\n");
         yaml.append("  # The data to broadcast over Xbox Live\n");
         yaml.append("  session-info:\n");
-        yaml.append("    host-name: \"Geyser Test Server\"\n");
-        yaml.append("    world-name: \"GeyserMC Demo & Test Server\"\n");
+        yaml.append("    host-name: \"").append(escapeYaml(cfgHostName.getText())).append("\"\n");
+        yaml.append("    world-name: \"").append(escapeYaml(cfgWorldName.getText())).append("\"\n");
         yaml.append("    players: 0\n");
         yaml.append("    max-players: 20\n");
         yaml.append("    ip: \"").append(escapeYaml(cfgRemoteAddress.getText().trim())).append("\"\n");
@@ -1175,6 +1195,9 @@ public class MCXboxBroadcastGUI extends JFrame {
     }
 
     private static String unquote(String s) {
+        if (s.startsWith("'") && s.endsWith("'") && s.length() >= 2) {
+            return s.substring(1, s.length() - 1).replace("''", "'");
+        }
         if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) {
             return s.substring(1, s.length() - 1).replace("\\\"", "\"").replace("\\\\", "\\");
         }

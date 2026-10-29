@@ -17,14 +17,15 @@ This project is only a GUI wrapper. Full credit for the broadcaster itself goes 
 - Expired Xbox login recovery that pauses restart loops, asks for re-auth, and resumes the session after sign-in.
 - After the account is successfully authenticated, the launcher waits briefly, then automatically restarts the broadcast session to refresh NetherNet.
 
-## Download
+## Download and Launch on Windows
 
-The easiest way to use the launcher is from the GitHub Releases page.
+Use the ready-to-run Windows package. You do not need to build the project or install Java separately when using the complete release package.
 
-1. Open the repository's **Releases** page.
-2. Download `MCXboxBroadcast-Windows.zip` from the release that includes the Bedrock version you need.
-3. Extract the whole ZIP to a normal writable folder, such as your Downloads folder. Do not run it from inside the ZIP.
-4. Open the extracted `MCXboxBroadcast` folder and run `MCXboxBroadcast.exe`.
+1. Open [Releases](https://github.com/Tribalize/MCXboxBroadcastGUI/releases) and select a release that supports your Minecraft Bedrock version.
+2. Under **Assets**, download **MCXboxBroadcast-Windows.zip**. The **Source code** downloads are for building the project, not launching it.
+3. In File Explorer, right-click the downloaded ZIP and choose **Extract All...**, then **Extract**. Choose a folder you can write to, such as a folder inside Downloads or Documents.
+4. Open the extracted folder and find **MCXboxBroadcast.exe**. Depending on the extraction folder you chose, you may need to open another folder first. The EXE should be beside the **app** and **runtime** folders.
+5. Double-click **MCXboxBroadcast.exe** to open the launcher. Do not launch it while browsing inside the ZIP.
 
 The extracted folder is an application bundle. Start only `MCXboxBroadcast.exe`; do not run the JAR files inside `app` directly.
 
@@ -32,19 +33,24 @@ Keep the following files and folders together in the extracted `MCXboxBroadcast`
 
 - `MCXboxBroadcast.exe` -- starts the GUI.
 - `app` -- contains the GUI files and the bundled `MCXboxBroadcastStandalone.jar` that does the broadcasting.
-- `runtime` (if included) -- the Java runtime used by the packaged launcher.
+- `runtime` -- the bundled Java runtime used by the packaged launcher.
 
 Moving, deleting, or copying only the `.exe` will prevent the GUI from starting correctly. If the package is moved to another PC, copy the entire extracted `MCXboxBroadcast` folder, including `app` and `runtime`.
+
+For easier access, right-click the extracted EXE, choose **Show more options** if needed, then **Send to** -> **Desktop (create shortcut)**. Keep the original application folder in place.
 
 ## First Start
 
 1. Start `MCXboxBroadcast.exe` from the extracted application folder.
-2. On the **Server** tab, enter the Bedrock server address and port, then save the server configuration.
+2. On the **Server** tab, enter your Bedrock server's address and port. In releases with **Host Name** and **World Name** fields, set the names you want to advertise. Click **Save Server Config**.
 3. Leave **Query server before broadcasting** enabled when this PC can reach the server. Turn it off if the server cannot be pinged from this PC (for example, because it is on a different network or blocks status queries).
-4. Start the broadcast. On the first run, the log displays a Microsoft device-login code. Follow the prompt, sign in with the Xbox account that will host the broadcast, and enter that code in the browser.
-5. After authentication completes, leave the GUI running. Players can then join the broadcast session from Minecraft/Xbox.
+4. Open the **Launcher** tab and click **Start**. The bundled standalone JAR should be detected automatically.
+5. On the first run, the log displays a Microsoft device-login code. Follow the prompt or click **Open Microsoft Login Page**, sign in with the Xbox account that will host the broadcast, and enter the displayed code.
+6. Wait for the log to confirm that the Xbox Live session was created. Leave the launcher open and the broadcast PC awake while players use the broadcast session. Your Bedrock server must also remain running.
 
-The release package includes the GUI app image and the matching MCXboxBroadcast standalone JAR built by GitHub Actions. When making a new GUI release, first ensure the broadcaster build is successful; the GUI workflow downloads and bundles that updated standalone JAR automatically.
+On later launches, open the same extracted EXE and click **Start**. Sign in again if the launcher requests it. Use **Stop** when you want to end the broadcast.
+
+The release package includes the launcher, broadcaster, and Java runtime together. Editing the repository's source files does not update an already downloaded EXE; install a newly built release to receive those changes.
 
 ## Forking This Repository
 
@@ -77,6 +83,12 @@ The Windows package is built manually from the Actions page. It does not build o
 When the workflow finishes, it uploads `MCXboxBroadcast-Windows.zip` to the Releases page using the release tag you entered.
 
 ## Troubleshooting
+
+### The launcher will not open or cannot find its files
+
+Extract the complete release ZIP again into a new folder. Open the EXE from that folder and check that **app** and **runtime** are beside it. Do not copy the EXE out on its own.
+
+If the GUI opens but says the standalone JAR is missing, use **Browse...** on the **Launcher** tab to select `app/MCXboxBroadcastStandalone.jar` inside the same extracted package.
 
 ### Xbox login expired
 
