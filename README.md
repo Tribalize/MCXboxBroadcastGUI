@@ -90,6 +90,12 @@ Extract the complete release ZIP again into a new folder. Open the EXE from that
 
 If the GUI opens but says the standalone JAR is missing, use **Browse...** on the **Launcher** tab to select `app/MCXboxBroadcastStandalone.jar` inside the same extracted package.
 
+If double-clicking the EXE does nothing, run **Launch-with-diagnostics.cmd** from the same extracted folder (included in newly built releases). It keeps a console open after the launcher exits and saves `launcher-startup.log` beside the EXE. Share that log when reporting a startup problem.
+
+### Minecraft says the host is using an older version
+
+The broadcaster must support your Minecraft version as well as your hosted server. Updating the hosted server alone does not update the broadcaster bundled with this launcher. Install a newly built compatible Windows release into a new folder, and check the startup log for the broadcaster's Bedrock version and protocol number. If you previously selected a custom JAR, use **Browse...** to select the standalone JAR inside the new package's **app** folder.
+
 ### Xbox login expired
 
 If the launcher shows `Re-auth required`, the saved Microsoft/Xbox login has expired and Microsoft requires the account to sign in again. This cannot be completed silently in the background.

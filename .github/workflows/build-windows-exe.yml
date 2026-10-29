@@ -8,7 +8,7 @@ on:
       release_tag:
         description: 'Release tag to publish, for example v1.0.2'
         required: true
-        default: 'v1.2.4'
+        default: 'v1.2.3'
       prerelease:
         description: 'Mark this GitHub Release as a prerelease'
         required: true
@@ -33,7 +33,8 @@ jobs:
       - name: Checkout Broadcaster repo
         uses: actions/checkout@v4
         with:
-          repository: Tribalize/MCXboxBroadcast
+          # The upstream broadcaster includes Bedrock 1.26.60 / protocol 2225 support.
+          repository: MCXboxBroadcast/Broadcaster
           ref: master
           path: broadcaster
 
@@ -133,12 +134,37 @@ jobs:
             --main-jar MCXboxBroadcastGUI.jar `
             --main-class MCXboxBroadcastGUI `
             --dest output `
+            --jlink-options "--strip-debug --no-man-pages --no-header-files" `
             --java-options "-Xms64m" `
             --java-options "-Xmx512m" `
             --win-console
 
           Write-Output "=== jpackage output ==="
           Get-ChildItem -Recurse output | ForEach-Object { Write-Output $_.FullName }
+
+      - name: Verify bundled runtime and include startup diagnostics
+        working-directory: package
+        run: |
+          $java = Join-Path $PWD "output/MCXboxBroadcast/runtime/bin/java.exe"
+          if (-not (Test-Path $java)) { throw "Bundled java.exe is required to launch the broadcaster" }
+          & $java -version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled Java failed to start" }
+          @'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          set "JPACKAGE_DEBUG=true"
+          echo Starting MCXboxBroadcast. Close the launcher to finish the log.
+          "%~dp0MCXboxBroadcast.exe" > "%~dp0launcher-startup.log" 2>&1
+          set "LAUNCH_EXIT=%ERRORLEVEL%"
+          echo.
+          echo Launcher exit code: %LAUNCH_EXIT%
+          type "%~dp0launcher-startup.log"
+          echo.
+          echo Diagnostic log: "%~dp0launcher-startup.log"
+          pause
+          exit /b %LAUNCH_EXIT%
+          '@ | Set-Content -Path "output/MCXboxBroadcast/Launch-with-diagnostics.cmd" -Encoding ASCII
 
      
       - name: Create distribution ZIP
